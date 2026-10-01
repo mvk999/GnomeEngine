@@ -1,0 +1,11 @@
+[package]
+name = "gnomeengine-renderer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gtk = { package = "gtk4", version = "0.9", features = ["v4_8"] }
+gdk = { package = "gdk4", version = "0.9" }
+glib = "0.20"
+gstreamer = "0.23"
