@@ -5,9 +5,13 @@ lightweight is made without measurements.
 
 ## Measurement status
 
-No baseline or playback measurements have been collected yet. The development
-session used for this initial code slice did not provide a usable Linux command
-executor, so no GNOME, Wayland, GStreamer, CPU, RAM, or GPU values are reported.
+No baseline or playback measurements have been collected yet. The environment
+inspected on 2026-10-02 was Ubuntu 24.04 with GNOME Shell 46 on X11 and lacked
+Rust/Cargo and GTK/GStreamer development pkg-config files. It is not the
+supported GNOME 50+ Wayland validation target. No CPU, RAM, GPU, or decoder
+values are reported. See
+[performance engineering](engineering/performance.md) for the measurement
+protocol.
 
 ## Record template
 

@@ -1,0 +1,12 @@
+# Architecture Decision Records
+
+ADRs record durable choices and their trade-offs, not routine implementation
+details. Accepted decisions remain useful historical context even if later
+superseded; write a new ADR rather than silently rewriting the reason.
+
+Current records:
+
+- [ADR-0001: Keep video work outside GNOME Shell](0001-external-renderer.md)
+- [ADR-0002: Initial platform boundary](0002-initial-platform.md)
+- [ADR-0003: GStreamer playback proof of concept](0003-gstreamer-prototype.md)
+- [ADR-0004: Debian package as first distribution](0004-debian-first.md)

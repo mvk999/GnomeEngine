@@ -1,4 +1,4 @@
-use std::{cell::RefCell, env, error::Error, path::PathBuf, rc::Rc};
+use std::{cell::RefCell, env, error::Error, path::{Path, PathBuf}, rc::Rc};
 
 use gstreamer as gst;
 use gst::prelude::*;
@@ -27,7 +27,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let active_pipeline = Rc::new(RefCell::new(None));
     let pipeline_for_activate = active_pipeline.clone();
     app.connect_activate(move |app| {
-        match activate_renderer(app, &path) {
+        match activate_renderer(app, path.as_path()) {
             Ok(pipeline) => *pipeline_for_activate.borrow_mut() = Some(pipeline),
             Err(error) => {
                 eprintln!("gnomeengine-renderer: {error}");
@@ -49,12 +49,12 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn activate_renderer(
     app: &gtk::Application,
-    path: &PathBuf,
+    path: &Path,
 ) -> Result<gst::Element, Box<dyn Error>> {
     let sink = gst::ElementFactory::make("gtk4paintablesink").build()?;
     let paintable = sink.property::<gdk::Paintable>("paintable");
     let pipeline = gst::ElementFactory::make("playbin").build()?;
-    pipeline.set_property("uri", gst::glib::filename_to_uri(path.as_path(), None)?);
+    pipeline.set_property("uri", gst::glib::filename_to_uri(path, None)?);
     pipeline.set_property("video-sink", &sink);
     pipeline.set_property("audio-sink", &gst::ElementFactory::make("fakesink").build()?);
 

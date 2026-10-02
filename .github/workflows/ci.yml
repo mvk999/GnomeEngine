@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Fast checks (Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for extension checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            pkg-config \
+            libgtk-4-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
+
+      - name: Install Rust stable with required components
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Run canonical checks
+        run: ./scripts/check.sh
