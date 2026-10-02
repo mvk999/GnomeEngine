@@ -7,7 +7,8 @@ Lightweight live wallpaper engine built specifically for GNOME and Wayland.
 The first milestone is a rendering proof of concept. It targets GNOME 50+ on
 Wayland and prioritizes desktop responsiveness, low idle work, and correct
 resource cleanup. No performance claim is made until measurements are recorded
-on supported hardware.
+on supported hardware. The project is experimental and has no decided license
+yet.
 
 ## Current status
 
@@ -79,6 +80,10 @@ Ubuntu publishes the GTK4 sink plugin as [`gstreamer1.0-gtk4`](https://packages.
 cargo check --workspace
 ```
 
+The canonical fast checks used by CI are `./scripts/check.sh`. It requires
+Rust/Cargo and the native development libraries listed above; see
+[the testing strategy](docs/engineering/testing.md).
+
 ### 4. Play a local video
 
 Pass an existing video file by absolute path:
@@ -99,8 +104,13 @@ acceleration must not be assumed.
 - `app/` (planned): GTK4 and Libadwaita configuration UI.
 - `extension/` (planned): minimal GNOME Shell integration and lifecycle hooks.
 
-See [architecture decisions](docs/architecture.md) and the
+See the [architecture map](ARCHITECTURE.md),
+[decision records](docs/decisions/README.md), and the
 [performance record](docs/performance.md).
+
+For contributor and coding-agent onboarding, start with [AGENTS.md](AGENTS.md)
+and the [architecture map](ARCHITECTURE.md). The product roadmap and engineering
+knowledge base live under [`docs/`](docs/).
 
 ## Limitations
 
