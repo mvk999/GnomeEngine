@@ -35,4 +35,4 @@ Do not commit large test videos; document the required media characteristics.
 ## Results
 
 The measurement record and blank template live in
-[docs/performance.md](../performance.md). No baseline has been recorded yet.
+[docs/performance.md](../performance.md).

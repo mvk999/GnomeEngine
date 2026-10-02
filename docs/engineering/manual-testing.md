@@ -17,10 +17,30 @@ session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
 5. Try an invalid path and a video with an unsupported codec; record the
    observed error.
 
-## Future desktop integration checklist
+## M3 smart lifecycle checklist
 
-Once a supported GNOME 50+ Wayland bridge exists, validate background
-placement, Alt+Tab, Overview, workspaces, focus/input pass-through, fullscreen
-pause/resume, lock/unlock, suspend/resume, extension disable/enable, app
-reopen, Stop cleanup, and monitor hotplug. Run these in a disposable or nested
-session where possible. Record any item that cannot be tested.
+Run only in a disposable or nested supported GNOME 50+ Wayland session. The
+current GTK preview is not a desktop background, so successful lifecycle
+signals do not establish desktop wallpaper visibility.
+
+- [ ] renderer service starts and exports its D-Bus API
+- [ ] video playback starts and manual Pause/Resume preserves position
+- [ ] fullscreen automatically pauses and leaving fullscreen resumes
+- [ ] a visible secondary rendered output prevents global fullscreen pause
+- [ ] lock pauses; repeated lock/unlock does not stick or duplicate reasons
+- [ ] battery transition pauses; AC reconnect resumes when appropriate
+- [ ] display power changes pause/resume on supported built-in panel hardware
+- [ ] suspend pauses; resume removes only `system-sleep`
+- [ ] monitor hotplug recomputes fullscreen/output state without a crash
+- [ ] duplicate reason updates do not emit duplicate reason-change signals
+- [ ] removing one of multiple reasons never resumes early
+- [ ] Stop while auto-paused remains Stopped after the condition clears
+- [ ] applying while an automatic reason is active remains paused
+- [ ] renderer restart receives a current Shell lifecycle snapshot
+- [ ] renderer disappearance/crash does not crash GNOME Shell
+- [ ] disabling/re-enabling the extension leaves no unintended stale reason
+- [ ] Alt+Tab, Overview, workspace switching, and input behavior are unchanged
+- [ ] measure playing, paused, and stopped CPU/RSS with identical media/session
+
+Record unavailable battery, display, suspend, multi-monitor, or performance
+tests explicitly; never infer them from unit tests.

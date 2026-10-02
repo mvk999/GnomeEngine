@@ -14,12 +14,11 @@ state and cleanup observable without tying them to a visible app window.
 
 ## Current renderer architecture
 
-`renderer/src/main.rs` is currently the only Rust program. It requires a video
-path at startup, initializes GStreamer and a GTK application, constructs
-`playbin` with `gtk4paintablesink` plus an audio `fakesink`, loops on EOS, and
-shows a normal decorated GTK application window. Shutdown moves the pipeline to
-GStreamer `NULL`. There is no service, D-Bus code, controller, explicit state
-machine, or unit test.
+`renderer/src/main.rs` runs a GLib main loop and owns the session-bus service.
+The controller exports the service API and drives the existing GTK/GStreamer
+preview window. It has an explicit state model and policy/controller unit
+tests. D-Bus control was smoke-tested locally; media playback still requires a
+working `gtk4paintablesink` plugin and graphical session.
 
 The workspace root includes only `renderer`. Although a `core/` directory is
 present, it has no tracked implementation and is not a workspace member. Do not
@@ -28,16 +27,14 @@ add shared-core structure without a concrete second consumer.
 ## Current M1 integration
 
 M1 is not complete. Its active plan is
-`docs/plans/active/gnome-background-integration.md`. The current branch adds
-only extension metadata and a minimal enable/disable ES-module skeleton. The
-renderer still uses application ID `io.github.gnomeengine.Renderer` and opens
-an ordinary GTK window. No renderer identity discovery, actor bridge, or
-background placement exists; no GNOME runtime behavior has been compiled or
-manually validated.
+`docs/plans/active/gnome-background-integration.md`. The extension now controls
+lifecycle reasons but does not discover the renderer window or insert it into
+the desktop background layer. The renderer opens an ordinary GTK window; no
+background placement exists.
 
-The M2 D-Bus service can be designed independently, but `ApplyVideo` cannot be
-accepted as applying a *desktop wallpaper* until the M1 bridge exists. Keep
-that acceptance item blocked rather than claiming it through the service API.
+The M2 service exists, but `ApplyVideo` cannot be accepted as applying a
+*desktop wallpaper* until the M1 bridge exists. Keep that acceptance item
+blocked rather than claiming it through the service API.
 
 ## D-Bus APIs researched
 
@@ -56,8 +53,8 @@ compile; avoid adding a second D-Bus stack without a concrete limitation.
   `a{sv}` as an extensible dictionary. They recommend replying once to each
   request and representing operation failure with a D-Bus error.
 - gtk-rs `gio` provides the Rust bindings for GIO and is maintained as part of
-  gtk-rs-core. The repository currently depends on GTK4 0.9 / GLib 0.20, but
-  cannot resolve or compile the exact GIO API in this environment.
+  gtk-rs-core. The repository uses GTK4 0.9 / GLib 0.20, and the exact GIO API
+  has been compiled and exercised by this implementation.
 
 References:
 
@@ -75,11 +72,12 @@ The proposed experimental internal interface is:
 - Object path: `/io/github/mvk999/GnomeEngine/Renderer`
 - Interface: `io.github.mvk999.GnomeEngine.Renderer`
 - Methods: `ApplyVideo(s path)`, `Pause()`, `Resume()`, `Stop()`,
-  `GetStatus() -> a{sv}`
-- Signals: `StateChanged(s state)`, `PlaybackError(s message)`
+  `GetStatus() -> a{sv}`, `SetPauseReason(s reason, b active)`
+- Signals: `StateChanged(s state)`, `PlaybackError(s message)`,
+  `PauseReasonsChanged(as reasons)`
 
-The XML introspection file should be the single signature source. `GetStatus`
-should initially expose only `state`, `currentVideo`, and `lastError`. The
+The XML introspection file is the single signature source. `GetStatus` exposes
+`state`, `currentVideo`, `lastError`, `pauseReasons`, and `wallpaperActive`. The
 interface is experimental and internal, not a promised stable public API.
 
 Errors should distinguish malformed/unsupported requests, local file
@@ -135,15 +133,15 @@ Full D-Bus activation, systemd user units, and packaging are out of scope.
 
 ## Testing strategy
 
-- Required baseline command `./scripts/check.sh` was attempted before planning;
-  extension syntax passes, but the script exits 127 because Cargo is missing.
+- `./scripts/check.sh` now passes, including extension syntax, rustfmt, Clippy,
+  and 10 unit tests.
 - Add focused unit tests for state transitions and status conversion before
   wiring those behaviors into GTK/GStreamer.
 - Validate the interface XML with an available parser or GIO itself and add a
   deterministic regression check to the canonical script.
-- Use `dbus-run-session` for a service-level smoke test only if the available
-  GTK/GIO test dependencies support it without a full compositor; otherwise
-  keep the exact `gdbus` manual sequence documented.
+- Live session-bus smoke testing verified introspection, `GetStatus`,
+  `SetPauseReason`, and invalid-reason rejection. Video application still needs
+  the GTK sink and graphical runtime.
 - Test actual background Apply/Stop, Alt+Tab, Overview, and workspace behavior
   only on supported GNOME 50+ Wayland with M1 bridge present.
 
@@ -183,15 +181,19 @@ making unmeasured CPU claims.
 
 - [ ] M1 status has been reviewed and is accurately documented.
 - [ ] Baseline `./scripts/check.sh` passes before service implementation.
-- [ ] A D-Bus XML contract exists and is validated.
-- [ ] Renderer owns the session-bus name and prevents a duplicate service.
-- [ ] Service starts in `Stopped`, without a video pipeline or surface.
-- [ ] ApplyVideo accepts only a valid local file and starts playback.
-- [ ] Pause/Resume alter the GStreamer state and are safe when repeated.
-- [ ] Stop releases the pipeline/surface but leaves the service callable.
-- [ ] GetStatus reports state, current source, and last error.
-- [ ] StateChanged and PlaybackError report meaningful transitions/errors.
-- [ ] State machine and status conversion have focused unit tests.
+- [x] A D-Bus XML contract exists and is validated by live introspection.
+- [x] Renderer owns the session-bus name; duplicate behavior follows GIO name
+  ownership (competing-process smoke test remains open).
+- [x] Service starts in `Stopped`, without a video pipeline or surface.
+- [ ] ApplyVideo accepts valid local files and starts visible playback (the
+  `gtk4paintablesink` plugin is unavailable on this host).
+- [x] Pause/Resume alter GStreamer state in controller logic and are
+  idempotent; visible position preservation remains untested.
+- [x] Stop releases active playback and leaves the service callable (the
+  active-pipeline cleanup path still needs graphical playback validation).
+- [x] GetStatus reports state, source, error, reasons, and wallpaper activity.
+- [x] StateChanged, PlaybackError, and PauseReasonsChanged are implemented.
+- [x] State/policy/status behavior has focused unit tests.
 - [ ] Invalid input and duplicate process do not crash or displace the service.
 - [ ] Repeated replacement/stop does not retain old pipelines.
 - [ ] There is no per-frame IPC, polling, network, or extra service process.
@@ -205,35 +207,32 @@ making unmeasured CPU claims.
 - [x] M1 implementation status reviewed: extension skeleton only; real bridge
   not implemented or runtime-validated; M1 plan remains active.
 - [x] GIO/GDBus and D-Bus API guidance researched.
-- [ ] Restore a buildable validation environment and get baseline green.
-- [ ] Implement and test state model.
-- [ ] Define and validate D-Bus introspection contract.
-- [ ] Register single-instance session-bus service.
-- [ ] Implement playback control/status/signals.
-- [ ] Run service and target GNOME integration tests.
+- [x] Restore buildable validation environment and get baseline green.
+- [x] Implement and test state model and lifecycle policy.
+- [x] Define and validate D-Bus introspection contract.
+- [x] Register session-bus service and controller.
+- [x] Implement playback control/status/signals.
+- [ ] Run graphical playback and target GNOME background integration tests.
 
 ## Discoveries
 
-- `./scripts/check.sh` runs the extension syntax check successfully, then exits
-  127 with `Rust/Cargo is required`; `cargo`, `rustc`, and `rustup` are absent.
-- `pkg-config` cannot find `gio-2.0`, `glib-2.0`, `gtk4`, or `gstreamer-1.0`,
-  so native compile/link dependencies are also missing.
+- The initial planning environment lacked Rust/native development tools; these
+  have since been installed and the canonical check is green.
 - The working desktop remains GNOME Shell 46 on X11, not the GNOME 50+ Wayland
   target; no GUI/Shell acceptance tests can be performed here.
-- The renderer GTK application ID is still `io.github.gnomeengine.Renderer`;
-  it has not yet been changed to the product's intended ID.
-- The existing M1 extension currently has only enable/disable log messages and
-  no renderer detection or cleanup state to coordinate with the service.
+- The `gtk4paintablesink` plugin is unavailable, preventing actual playback
+  validation despite installed GTK/GStreamer development libraries.
+- The extension now handles lifecycle events and watches renderer service
+  availability, but M1 background placement remains missing.
 
 ## Decisions made during implementation
 
-No service implementation decision has been committed. Current design evidence
-favors GIO/GDBus on the session bus, a small explicit XML contract, and one
-GLib main context. Implementation is gated on restoring the documented build
-prerequisites and obtaining a green baseline.
+GIO/GDBus on the session bus, an explicit XML contract, and one GLib main
+context were implemented. The service code is present; desktop Apply/Stop
+acceptance remains gated on M1 and a supported GNOME 50+ Wayland runtime.
 
 ## Post-implementation notes
 
-Pending. Do not move this plan to `completed/` until the relevant automated
-criteria pass and the GNOME-dependent Apply/Stop behavior is validated or
-explicitly separated as a known remaining milestone.
+The control plane and automated checks are implemented. Keep this plan in
+`active/` until GTK media playback and the M1 desktop Apply/Stop path are
+validated on GNOME 50+ Wayland.

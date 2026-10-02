@@ -14,11 +14,16 @@ extension is limited to compositor integration and lifecycle events.
 
 ## Current state
 
-- The workspace contains the existing `renderer` crate only.
+- The workspace contains a Rust `renderer` crate and the ES-module Shell
+  extension. The renderer now has a session-bus lifecycle service, but still
+  displays video in a normal GTK preview window.
 - The renderer uses GTK4, GStreamer `playbin`, `gtk4paintablesink`, a fakesink
   for audio, EOS seek-to-start looping, and a normal decorated GTK window.
-- No GNOME Shell extension or renderer-to-Shell protocol exists.
-- `./scripts/check.sh` baseline is blocked because Rust/Cargo is not installed.
+- The extension now reports fullscreen, session lock, monitor topology, and
+  built-in-panel power lifecycle state over D-Bus. It does not discover or
+  place the renderer window as a desktop background.
+- `./scripts/check.sh` passes after Rust/native development dependencies were
+  installed; the GStreamer GTK paintable plugin itself is still unavailable.
 - The available test desktop is Ubuntu 24.04, GNOME Shell 46, X11. It cannot
   validate the GNOME 50+ Wayland behavior required by this milestone.
 
@@ -96,8 +101,9 @@ Revisit TypeScript when the extension logic has enough surface to justify it.
 - Actual background insertion and reliable Alt+Tab/Overview exclusion may only
   be possible through private Shell internals.
 - Mutter 51 documentation is not proof that GNOME 50 has identical behavior.
-- The local desktop is GNOME 46 on X11, and Rust/GStreamer development tooling is
-  missing; renderer compilation and target-session checks are unavailable here.
+- The local desktop is GNOME 46 on X11, below the GNOME 50+ Wayland target.
+  Mutter fullscreen/topology signals were locally introspected, but renderer
+  compilation does not validate background placement or target-session APIs.
 - Window actor availability is asynchronous; no fixed sleeps will be used as a
   synchronization mechanism.
 - Actor ownership, input transparency, workspace membership, monitor scaling,
@@ -124,8 +130,8 @@ Revisit TypeScript when the extension logic has enough surface to justify it.
 
 ## Testing strategy
 
-- Run `./scripts/check.sh` before and after applicable slices. Its Rust baseline
-  currently cannot run because Cargo is absent; do not report it as passing.
+- Run `./scripts/check.sh` before and after applicable slices. It now passes in
+  the available environment; do not treat that as GNOME runtime validation.
 - Run available deterministic syntax checks for extension JavaScript.
 - Add automated tests only for separable pure logic; do not mock the entire
   GNOME Shell runtime.
@@ -167,7 +173,9 @@ and guarded so failures cannot modify ordinary application actors.
 ## Progress
 
 - [x] Repository and existing renderer inspected.
-- [x] Baseline validation attempted; blocked by missing Rust/Cargo.
+- [x] Rust/GStreamer renderer now builds and canonical checks pass.
+- [x] Renderer lifecycle D-Bus protocol exists; real background bridge remains
+  unimplemented and unvalidated.
 - [x] GNOME/Mutter API research recorded.
 - [x] Add extension lifecycle skeleton.
 - [ ] Set stable renderer GTK application ID.

@@ -1,20 +1,33 @@
 # Architecture Map
 
-## Current state
+## Current state by milestone
 
-The only executable component is `renderer/`, a Rust binary that uses
-GStreamer `playbin` and `gtk4paintablesink`. It accepts a local video, drops
-audio, loops on end-of-stream, and presents the resulting paintable in an
-ordinary GTK window. This validates local playback only; it does not set the
-GNOME desktop background.
+M1 background placement remains incomplete: `renderer/` still presents the
+GStreamer paintable in an ordinary GTK window, not behind desktop icons or on
+the GNOME background layer. The extension does not place or control that
+surface.
+
+M2's session-bus renderer service is implemented. It owns one D-Bus name and
+exports `ApplyVideo`, `Pause`, `Resume`, `Stop`, and `GetStatus`. M3 adds an
+independent pause-reason set, event-driven shell lifecycle updates, and
+best-effort system-bus observers for UPower and logind.
 
 ```text
-Local video -> GStreamer playbin -> gtk4paintablesink -> GTK preview window
+Local video -> GStreamer playbin -> GTK paintable -> preview window
+                                      ^
+                                      |
+Desktop clients -- session D-Bus --> renderer service
+                                      ^
+GNOME Shell extension -- lifecycle --+
+UPower / logind -------- system bus -+
 ```
 
-## Intended process boundary
+These service and lifecycle layers control the prototype's playback, but do
+not turn its preview window into a real desktop background.
 
-The following is a target design, not implemented functionality:
+## Intended background process boundary
+
+The following remains a target design, not implemented functionality:
 
 ```text
 GnomeEngine desktop app
@@ -39,14 +52,15 @@ surface-sharing and background-layer mechanism remains an open design task.
 | Shader renderer | Planned | GPU shader playback, loaded only for an active shader wallpaper |
 | Web renderer | Planned | Isolated web content, loaded only for an active web wallpaper |
 
-Only video playback in a normal GTK window exists today. The app, renderer
-service, Shell extension, D-Bus control plane, library, and packages are not
-implemented.
+Only video playback in a normal GTK window exists today. There is no desktop
+app, library, media catalog, or package. The Shell extension is lifecycle-only
+and must remain a small, reversible controller.
 
 ## Detailed references
 
 - [Product vision](docs/product/vision.md)
 - [Renderer design](docs/design/renderer.md)
 - [GNOME integration design](docs/design/gnome-integration.md)
+- [Lifecycle design](docs/design/lifecycle.md)
 - [Architecture decisions](docs/decisions/README.md)
 - [Performance record](docs/performance.md)

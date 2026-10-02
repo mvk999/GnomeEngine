@@ -10,3 +10,4 @@ Current records:
 - [ADR-0002: Initial platform boundary](0002-initial-platform.md)
 - [ADR-0003: GStreamer playback proof of concept](0003-gstreamer-prototype.md)
 - [ADR-0004: Debian package as first distribution](0004-debian-first.md)
+- [ADR-0005: Independent renderer pause reasons](0005-independent-pause-reasons.md)
