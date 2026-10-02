@@ -3,5 +3,6 @@
   "name": "GnomeEngine",
   "description": "GNOME desktop background integration for GnomeEngine",
   "shell-version": ["50"],
+  "session-modes": ["user", "unlock-dialog"],
   "version": 1
 }
