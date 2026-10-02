@@ -19,6 +19,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Set up Node.js for extension checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - name: Install native build dependencies
         run: |
           sudo apt-get update

@@ -169,7 +169,7 @@ and guarded so failures cannot modify ordinary application actors.
 - [x] Repository and existing renderer inspected.
 - [x] Baseline validation attempted; blocked by missing Rust/Cargo.
 - [x] GNOME/Mutter API research recorded.
-- [ ] Add extension lifecycle skeleton.
+- [x] Add extension lifecycle skeleton.
 - [ ] Set stable renderer GTK application ID.
 - [ ] Implement event-driven renderer window discovery.
 - [ ] Establish and validate GNOME 50 background actor integration.
@@ -186,3 +186,6 @@ and guarded so failures cannot modify ordinary application actors.
 - The current development environment cannot validate the milestone's target
   platform; a GNOME 50+ Wayland session and Rust toolchain are required for final
   acceptance.
+- The extension skeleton uses GNOME's ES-module `Extension` lifecycle and is
+  syntax-checked through the canonical repository check script; it performs no
+  shell work while idle.

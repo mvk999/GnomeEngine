@@ -1,0 +1,7 @@
+{
+  "uuid": "gnomeengine@mvk999.github.io",
+  "name": "GnomeEngine",
+  "description": "GNOME desktop background integration for GnomeEngine",
+  "shell-version": ["50"],
+  "version": 1
+}
