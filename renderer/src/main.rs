@@ -1,19 +1,13 @@
-use std::{
-    cell::RefCell,
-    env,
-    error::Error,
-    path::{Path, PathBuf},
-    rc::Rc,
-};
+use std::{cell::RefCell, env, rc::Rc};
 
-use gst::prelude::*;
 use gstreamer as gst;
-use gtk::prelude::*;
 
-struct ActivePlayback {
-    _bus_watch: gst::bus::BusWatchGuard,
-    pipeline: gst::Element,
-}
+mod controller;
+mod dbus;
+pub mod lifecycle;
+mod power;
+
+use controller::{RendererController, BUS_NAME};
 
 fn main() {
     if let Err(error) = run() {
@@ -22,95 +16,63 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn Error>> {
-    let path = env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .ok_or("usage: gnomeengine-renderer VIDEO")?;
-    if !path.is_file() {
-        return Err(format!("not a local file: {}", path.display()).into());
-    }
-
+fn run() -> Result<(), Box<dyn std::error::Error>> {
     gst::init()?;
-    let app = gtk::Application::builder()
-        .application_id("io.github.gnomeengine.Renderer")
-        .build();
-    let active_playback = Rc::new(RefCell::new(None));
-    let playback_for_activate = active_playback.clone();
-    app.connect_activate(move |app| match activate_renderer(app, path.as_path()) {
-        Ok(playback) => *playback_for_activate.borrow_mut() = Some(playback),
-        Err(error) => {
-            eprintln!("gnomeengine-renderer: {error}");
-            app.quit();
-        }
-    });
-    let playback_on_shutdown = active_playback.clone();
-    app.connect_shutdown(move |_| {
-        if let Some(playback) = playback_on_shutdown.borrow_mut().take() {
-            if let Err(error) = playback.pipeline.set_state(gst::State::Null) {
-                eprintln!("gnomeengine-renderer: failed to stop pipeline: {error}");
-            }
-        }
-    });
-    app.run_with_args(&["gnomeengine-renderer"]);
-    Ok(())
-}
 
-fn activate_renderer(
-    app: &gtk::Application,
-    path: &Path,
-) -> Result<ActivePlayback, Box<dyn Error>> {
-    let sink = gst::ElementFactory::make("gtk4paintablesink").build()?;
-    let paintable = sink.property::<gdk::Paintable>("paintable");
-    let pipeline = gst::ElementFactory::make("playbin").build()?;
-    pipeline.set_property("uri", gst::glib::filename_to_uri(path, None)?);
-    pipeline.set_property("video-sink", &sink);
-    pipeline.set_property(
-        "audio-sink",
-        &gst::ElementFactory::make("fakesink").build()?,
+    let initial_video = env::args_os()
+        .nth(1)
+        .map(|path| path.to_string_lossy().into_owned());
+    let controller = RendererController::new();
+    let system_observers = power::SystemObservers::default();
+    system_observers.start(controller.clone());
+    let main_loop = glib::MainLoop::new(None, false);
+    let registration_id = Rc::new(RefCell::new(None));
+    let dbus_connection = Rc::new(RefCell::new(None));
+
+    let loop_on_bus_error = main_loop.clone();
+    let registration_on_bus = registration_id.clone();
+    let connection_on_bus = dbus_connection.clone();
+    let controller_on_bus = controller.clone();
+    let loop_on_name_lost = main_loop.clone();
+    let controller_on_name_acquired = controller.clone();
+
+    let owner_id = gio::bus_own_name(
+        gio::BusType::Session,
+        BUS_NAME,
+        gio::BusNameOwnerFlags::NONE,
+        move |connection, _| {
+            controller_on_bus.attach_dbus_connection(connection.clone());
+            *connection_on_bus.borrow_mut() = Some(connection.clone());
+            match dbus::register_object(&connection, controller_on_bus.clone()) {
+                Ok(id) => *registration_on_bus.borrow_mut() = Some(id),
+                Err(error) => {
+                    eprintln!("gnomeengine-renderer: failed to export D-Bus API: {error}");
+                    loop_on_bus_error.quit();
+                }
+            }
+        },
+        move |_, _| {
+            eprintln!("INFO renderer service acquired session bus name {BUS_NAME}");
+            if let Some(path) = initial_video.as_deref() {
+                if let Err(error) = controller_on_name_acquired.apply_video(path) {
+                    eprintln!("gnomeengine-renderer: {error}");
+                }
+            }
+        },
+        move |_, _| {
+            eprintln!("gnomeengine-renderer: renderer service name is unavailable");
+            loop_on_name_lost.quit();
+        },
     );
 
-    let picture = gtk::Picture::for_paintable(&paintable);
-    picture.set_can_shrink(true);
-    picture.set_content_fit(gtk::ContentFit::Cover);
-    let window = gtk::ApplicationWindow::builder()
-        .application(app)
-        .title("GnomeEngine Renderer")
-        .default_width(960)
-        .default_height(540)
-        .child(&picture)
-        .build();
-
-    let bus = pipeline.bus().ok_or("GStreamer pipeline has no bus")?;
-    let bus_watch = bus.add_watch_local({
-        let pipeline = pipeline.clone();
-        move |_, message| {
-            use gst::MessageView;
-            match message.view() {
-                MessageView::Eos(..) => {
-                    if let Err(error) = pipeline.seek_simple(
-                        gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
-                        gst::ClockTime::ZERO,
-                    ) {
-                        eprintln!("gnomeengine-renderer: loop seek failed: {error}");
-                        return glib::ControlFlow::Break;
-                    }
-                }
-                MessageView::Error(error) => {
-                    eprintln!("gnomeengine-renderer: {}", error.error());
-                    return glib::ControlFlow::Break;
-                }
-                _ => {}
-            }
-            glib::ControlFlow::Continue
+    main_loop.run();
+    system_observers.stop();
+    controller.shutdown();
+    if let Some(registration_id) = registration_id.borrow_mut().take() {
+        if let Some(connection) = dbus_connection.borrow().as_ref() {
+            let _ = connection.unregister_object(registration_id);
         }
-    })?;
-
-    pipeline.set_state(gst::State::Playing)?;
-    eprintln!("INFO renderer initialized; GStreamer autoplugging enabled");
-    window.present();
-    Ok(ActivePlayback {
-        _bus_watch: bus_watch,
-        pipeline,
-    })
+    }
+    gio::bus_unown_name(owner_id);
+    Ok(())
 }

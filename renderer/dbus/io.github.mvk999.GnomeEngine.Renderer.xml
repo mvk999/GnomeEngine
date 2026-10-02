@@ -1,0 +1,26 @@
+<node>
+  <interface name="io.github.mvk999.GnomeEngine.Renderer">
+    <method name="ApplyVideo">
+      <arg name="path" type="s" direction="in"/>
+    </method>
+    <method name="Pause"/>
+    <method name="Resume"/>
+    <method name="Stop"/>
+    <method name="GetStatus">
+      <arg name="status" type="a{sv}" direction="out"/>
+    </method>
+    <method name="SetPauseReason">
+      <arg name="reason" type="s" direction="in"/>
+      <arg name="active" type="b" direction="in"/>
+    </method>
+    <signal name="StateChanged">
+      <arg name="state" type="s"/>
+    </signal>
+    <signal name="PlaybackError">
+      <arg name="message" type="s"/>
+    </signal>
+    <signal name="PauseReasonsChanged">
+      <arg name="reasons" type="as"/>
+    </signal>
+  </interface>
+</node>
