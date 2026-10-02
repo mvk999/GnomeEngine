@@ -1,8 +1,19 @@
-use std::{cell::RefCell, env, error::Error, path::{Path, PathBuf}, rc::Rc};
+use std::{
+    cell::RefCell,
+    env,
+    error::Error,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
-use gstreamer as gst;
 use gst::prelude::*;
+use gstreamer as gst;
 use gtk::prelude::*;
+
+struct ActivePlayback {
+    _bus_watch: gst::bus::BusWatchGuard,
+    pipeline: gst::Element,
+}
 
 fn main() {
     if let Err(error) = run() {
@@ -24,21 +35,19 @@ fn run() -> Result<(), Box<dyn Error>> {
     let app = gtk::Application::builder()
         .application_id("io.github.gnomeengine.Renderer")
         .build();
-    let active_pipeline = Rc::new(RefCell::new(None));
-    let pipeline_for_activate = active_pipeline.clone();
-    app.connect_activate(move |app| {
-        match activate_renderer(app, path.as_path()) {
-            Ok(pipeline) => *pipeline_for_activate.borrow_mut() = Some(pipeline),
-            Err(error) => {
-                eprintln!("gnomeengine-renderer: {error}");
-                app.quit();
-            }
+    let active_playback = Rc::new(RefCell::new(None));
+    let playback_for_activate = active_playback.clone();
+    app.connect_activate(move |app| match activate_renderer(app, path.as_path()) {
+        Ok(playback) => *playback_for_activate.borrow_mut() = Some(playback),
+        Err(error) => {
+            eprintln!("gnomeengine-renderer: {error}");
+            app.quit();
         }
     });
-    let pipeline_on_shutdown = active_pipeline.clone();
+    let playback_on_shutdown = active_playback.clone();
     app.connect_shutdown(move |_| {
-        if let Some(pipeline) = pipeline_on_shutdown.borrow_mut().take() {
-            if let Err(error) = pipeline.set_state(gst::State::Null) {
+        if let Some(playback) = playback_on_shutdown.borrow_mut().take() {
+            if let Err(error) = playback.pipeline.set_state(gst::State::Null) {
                 eprintln!("gnomeengine-renderer: failed to stop pipeline: {error}");
             }
         }
@@ -50,13 +59,16 @@ fn run() -> Result<(), Box<dyn Error>> {
 fn activate_renderer(
     app: &gtk::Application,
     path: &Path,
-) -> Result<gst::Element, Box<dyn Error>> {
+) -> Result<ActivePlayback, Box<dyn Error>> {
     let sink = gst::ElementFactory::make("gtk4paintablesink").build()?;
     let paintable = sink.property::<gdk::Paintable>("paintable");
     let pipeline = gst::ElementFactory::make("playbin").build()?;
     pipeline.set_property("uri", gst::glib::filename_to_uri(path, None)?);
     pipeline.set_property("video-sink", &sink);
-    pipeline.set_property("audio-sink", &gst::ElementFactory::make("fakesink").build()?);
+    pipeline.set_property(
+        "audio-sink",
+        &gst::ElementFactory::make("fakesink").build()?,
+    );
 
     let picture = gtk::Picture::for_paintable(&paintable);
     picture.set_can_shrink(true);
@@ -70,14 +82,13 @@ fn activate_renderer(
         .build();
 
     let bus = pipeline.bus().ok_or("GStreamer pipeline has no bus")?;
-    bus.add_watch_local({
+    let bus_watch = bus.add_watch_local({
         let pipeline = pipeline.clone();
         move |_, message| {
             use gst::MessageView;
             match message.view() {
                 MessageView::Eos(..) => {
                     if let Err(error) = pipeline.seek_simple(
-                        gst::Format::Time,
                         gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
                         gst::ClockTime::ZERO,
                     ) {
@@ -98,5 +109,8 @@ fn activate_renderer(
     pipeline.set_state(gst::State::Playing)?;
     eprintln!("INFO renderer initialized; GStreamer autoplugging enabled");
     window.present();
-    Ok(pipeline)
+    Ok(ActivePlayback {
+        _bus_watch: bus_watch,
+        pipeline,
+    })
 }
