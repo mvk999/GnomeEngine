@@ -28,6 +28,15 @@ measurements remain unavailable because `gtk4paintablesink` is missing. This
 single stopped-state sample is environment-specific and is not a general
 resource-use guarantee.
 
+## M4 application
+
+The GTK4/Libadwaita app and local library compile and pass non-graphical tests,
+but no app startup, library-idle, import, preview, or app-closed resource sample
+was collected. The host has GNOME 46/X11 and lacks the runtime
+`gtk4paintablesink`; no result is inferred from those tests. The app's preview
+is app-local and should exist only on the detail page. The renderer is a
+separate process and closing the UI does not send Stop.
+
 ## Record template
 
 Fill this section for each measurement run, using the same video and duration

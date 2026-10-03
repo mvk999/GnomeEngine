@@ -44,3 +44,38 @@ signals do not establish desktop wallpaper visibility.
 
 Record unavailable battery, display, suspend, multi-monitor, or performance
 tests explicitly; never infer them from unit tests.
+
+## M4 application checklist
+
+Run `cargo build --workspace`, then `cargo run -p gnomeengine` in a graphical
+session. The app is native GTK4/Libadwaita, but its Apply action currently
+controls the renderer's ordinary GTK preview window, not the GNOME background.
+
+- [ ] A fresh XDG data directory opens to the Library empty state.
+- [ ] Import one valid local video; title, static thumbnail, and available
+  metadata appear without blocking the window.
+- [ ] The original source remains unchanged; restart the app and confirm the
+  managed copy and cached thumbnail persist.
+- [ ] Import invalid media; a concise error appears and no partial card remains.
+- [ ] Open detail; one muted preview starts. Back stops/releases it.
+- [ ] Apply from detail; if the renderer is absent the app starts its sibling
+  executable directly, waits for D-Bus, and applies the managed copy.
+- [ ] Current renderer status and pause reasons are reflected; no status timer
+  is active.
+- [ ] Stop is explicit. Quit/close the app and verify it does not call Stop;
+  reopen and compare the D-Bus status/current item.
+- [ ] Change Pause on battery; verify the renderer stores the setting under
+  XDG config and exposes the new policy via `GetStatus` after restarting the
+  renderer.
+- [ ] Remove an inactive item; confirm the managed directory is removed and
+  the original remains. Remove an active item; Stop must succeed before the
+  managed copy is deleted.
+- [ ] Resize narrow and wide; check keyboard focus/actions, accessible names,
+  and GNOME light/dark preference.
+- [ ] Open/leave preview repeatedly and verify there is no accumulating
+  renderer/preview process or persistent app process after quitting.
+
+The host used for implementation is GNOME Shell 46 on X11; Gtk4's
+`gtk4paintablesink` plugin is unavailable. Mark graphical/runtime items above
+not validated on this host rather than treating compilation or unit tests as
+visual validation.

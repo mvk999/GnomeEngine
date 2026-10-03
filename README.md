@@ -4,19 +4,21 @@ Lightweight live wallpaper engine built specifically for GNOME and Wayland.
 
 > GnomeEngine is currently experimental.
 
-The first milestone is a rendering proof of concept. It targets GNOME 50+ on
-Wayland and prioritizes desktop responsiveness, low idle work, and correct
-resource cleanup. No performance claim is made until measurements are recorded
-on supported hardware. The project is experimental and has no decided license
-yet.
+GnomeEngine is an experimental Rust/GTK4/GStreamer project targeting GNOME 50+
+on Wayland. The app, local library, renderer service, and event-driven lifecycle
+controller are implemented, but the renderer still opens an ordinary GTK video
+window: the GNOME desktop-background bridge (M1) is not implemented. No
+performance claim is made without a recorded measurement. The project has no
+decided license yet.
 
 ## Current status
 
-The Rust renderer prototype accepts one local video file, uses GStreamer
-`playbin` with `gtk4paintablesink`, suppresses audio, and loops at end of stream.
-It currently presents a GTK window for validating decode and paintable output.
-The GNOME Shell background-layer bridge, app UI, and D-Bus controls are not yet
-implemented, so this prototype does not yet apply video as the desktop wallpaper.
+The native GTK4/Libadwaita app imports local videos into an XDG-managed library,
+extracts available media metadata and a cached thumbnail, previews one item,
+and controls the renderer over session D-Bus. The renderer supports independent
+pause reasons and lifecycle status. Apply currently opens playback in the
+renderer prototype's GTK preview window; it does not set the GNOME desktop
+background.
 
 ## Requirements
 
@@ -24,6 +26,7 @@ implemented, so this prototype does not yet apply video as the desktop wallpaper
 - Wayland session
 - Rust and Cargo
 - GTK4 development libraries
+- Libadwaita development libraries
 - GStreamer development libraries and the GTK4 sink plugin
 
 Dependencies are not installed automatically.
@@ -80,6 +83,18 @@ Ubuntu publishes the GTK4 sink plugin as [`gstreamer1.0-gtk4`](https://packages.
 cargo check --workspace
 ```
 
+Build both the app and renderer before running the app, so its on-demand
+renderer launch fallback can find the sibling executable:
+
+```sh
+cargo build --workspace
+cargo run -p gnomeengine
+```
+
+Close the app window to exit the controller UI; this does not stop an active
+renderer. The detail preview is app-local and stops when leaving the detail
+page.
+
 The canonical fast checks used by CI are `./scripts/check.sh`. It requires
 Rust/Cargo and the native development libraries listed above; see
 [the testing strategy](docs/engineering/testing.md).
@@ -100,9 +115,9 @@ acceleration must not be assumed.
 
 ## Architecture
 
-- `renderer/`: external Rust/GStreamer playback process.
-- `app/` (planned): GTK4 and Libadwaita configuration UI.
-- `extension/` (planned): minimal GNOME Shell integration and lifecycle hooks.
+- `app/`: GTK4/Libadwaita desktop client and local wallpaper library.
+- `renderer/`: external Rust/GStreamer playback and lifecycle service.
+- `extension/`: minimal GNOME Shell lifecycle integration.
 
 See the [architecture map](ARCHITECTURE.md),
 [decision records](docs/decisions/README.md), and the
@@ -114,18 +129,21 @@ knowledge base live under [`docs/`](docs/).
 
 ## Limitations
 
-- This is a decode/render prototype, not a desktop wallpaper yet.
-- No app UI, D-Bus control plane, Shell extension, fullscreen pause, or
-  lock/unlock validation is included yet.
+- This is not yet a real desktop wallpaper. The renderer uses a regular GTK
+  window until M1 compositor/background integration is completed.
+- GNOME 50+ Wayland runtime behavior has not been validated on the current
+  GNOME 46/X11 host. Battery, suspend, multi-monitor and graphical app flows
+  also need manual validation.
 - Hardware decoding, DMA-BUF import, zero-copy behavior, and resource usage
   have not been measured.
 - Only local video files are accepted; there are no downloads or scripts.
 
 ## Short roadmap
 
-1. M0: connect the external renderer to the GNOME background layer and validate
+1. M1: connect the external renderer to the GNOME background layer and validate
    desktop interaction and session lifecycle.
-2. Record a reproducible CPU/RAM/decode baseline.
-3. M1: add the minimal GTK4/Libadwaita app and D-Bus controls.
+2. Complete runtime validation and measure the lifecycle/resource behavior on
+   supported GNOME 50+ Wayland hardware.
+3. M5: native Ubuntu/Debian packaging and installation.
 
 The project license decision is pending.

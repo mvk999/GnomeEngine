@@ -39,14 +39,19 @@ the pipeline and active wallpaper, independently of automatic reasons. New
 wallpaper playback reconciles against the current set, so it does not bypass
 an active condition. GStreamer moves to `PAUSED` and resumes the existing
 pipeline position when the final reason clears. Battery pausing defaults on in
-an internal `LifecyclePolicyConfig`; there is no settings UI or persisted
-configuration in this milestone.
+an internal `LifecyclePolicyConfig`. M4 exposes the battery policy through the
+native app and persists it in renderer-owned
+`$XDG_CONFIG_HOME/gnomeengine/lifecycle.ini`, so the setting remains effective
+while the app is closed. Missing or invalid configuration falls back to
+pause-on-battery enabled.
 
 The service exposes `SetPauseReason(reason, active)` for controlled lifecycle
 updates, rejects names outside the six-value vocabulary, and emits
 `PauseReasonsChanged(as)` only after an actual set change. `GetStatus()` returns
-state, active video, last error, `pauseReasons`, and whether a wallpaper is
-active. `StateChanged` remains reserved for effective renderer-state changes.
+state, active video, last error, `pauseReasons`, whether playback is active,
+and the `pauseOnBattery` preference. M4 adds typed `SetPauseOnBattery(b)` and
+`PolicyChanged(s,b)`. `StateChanged` remains reserved for effective
+renderer-state changes.
 
 ## Event sources and failure behavior
 
