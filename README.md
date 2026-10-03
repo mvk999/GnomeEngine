@@ -1,197 +1,68 @@
 # GnomeEngine
 
-Lightweight live wallpaper engine built specifically for GNOME.
+GnomeEngine is an open-source project for using local videos as live wallpapers on GNOME. The goal is to bring more life to the desktop without getting in the way of everyday work or keeping the computer busy when the wallpaper does not need to be visible.
 
-> GnomeEngine is currently experimental.
+The project is written in Rust and uses GTK4/Libadwaita for its interface, GStreamer for video playback, and a small GNOME Shell extension to integrate the video surface with the desktop. There are no accounts, online catalogs, or server connections: the library is local, and the application is designed to work offline.
 
-GnomeEngine is an experimental Rust/GTK4/GStreamer project. M7 is validating
-Ubuntu 24.04/GNOME 46 on Wayland and X11, and Ubuntu 26.04/GNOME 50 on Wayland.
-Targeted GNOME 46 Apply/Stop smoke tests have passed, but the desktop bridge has
-not passed its full visual, lifecycle, and interaction acceptance on any
-target. No performance claim is made without a recorded measurement. The
-project is licensed under GPL-3.0-or-later; see [LICENSE](LICENSE).
+## How it works
 
-## Current status
+1. Import a video into the library. GnomeEngine keeps a managed local copy and creates a thumbnail and whatever metadata it can read.
+2. Open the wallpaper details to preview the video, then choose **Apply Wallpaper**.
+3. The application sends the request to the renderer over D-Bus. The renderer is a separate process that plays the video with GStreamer, keeping media decoding out of GNOME Shell.
+4. The GNOME extension integrates the renderer surface into the desktop layer and observes system events to apply pause policies, such as fullscreen windows, screen lock, or power conditions.
+5. You can close the application window without stopping the wallpaper. To stop playback, use **Stop** in the application.
 
-The native GTK4/Libadwaita app imports local videos into an XDG-managed library,
-extracts available media metadata and a cached thumbnail, previews one item,
-and controls the renderer over session D-Bus. The renderer supports independent
-pause reasons and lifecycle status. On a supported session with the enabled
-GnomeEngine Shell extension, Apply asks the session-specific bridge to place its
-input-transparent renderer surface in the desktop layer. The shared renderer,
-GStreamer pipeline, D-Bus control API, and lifecycle are retained across those
-bridges. Surface classification remains experimental pending the full target
-matrix and manual interaction/lifecycle tests.
+In short:
 
-## Validation targets (not yet support claims)
-
-The active test matrix is Ubuntu 24.04 / GNOME 46 / Wayland, Ubuntu 24.04 /
-GNOME 46 / actual Xorg, and Ubuntu 26.04 / GNOME 50 / Wayland. See the
-[compatibility report](docs/engineering/compatibility.md) for the exact status;
-none of these rows should be treated as fully supported until end-to-end
-validation is complete.
-
-## Installation
-
-There is not yet a public, runtime-validated release to download. M7 desktop
-integration acceptance is still in progress, so CI `.deb` files are temporary
-validation artifacts and are not supported end-user downloads. When a release
-is available, download the artifact for the validated Ubuntu target and install
-it with APT so missing declared dependencies are resolved automatically:
-
-```sh
-sudo apt install ./gnomeengine_<version>_<target>_amd64.deb
+```text
+GTK application ── local library and controls
+       │
+       └── D-Bus ── Renderer ── GStreamer ── wallpaper surface
+                                              │
+                                       GNOME Shell extension
 ```
 
-Then open **GnomeEngine** from the applications menu. The package does not
-automatically enable the GNOME Shell extension or modify Dock favorites; when
-the installed extension is available but not active, the app offers an explicit
-**Ativar integração** action.
+The renderer core, playback pipeline, D-Bus control API, and lifecycle are shared. Surface integration varies by GNOME session and graphics backend because Wayland and X11 use different mechanisms.
 
-## Build requirements
+## What exists today
 
-- Rust and Cargo
-- GTK4 development libraries
-- Libadwaita development libraries
-- GStreamer development libraries and video decoder plugins
-- GTK's GStreamer media backend (`libgtk-4-media-gstreamer` on Ubuntu)
+- A native desktop application for importing, organizing, searching, previewing, and applying video wallpapers.
+- A local library with thumbnails and available media metadata.
+- An external renderer controlled over D-Bus, with muted playback and pause/resume support.
+- Experimental GNOME Shell integration and lifecycle policies.
+- Infrastructure for shipping wallpapers with the application package. The initial wallpaper's video and thumbnail have not been added yet, so a fresh library may be empty.
 
-Dependencies are not installed automatically.
+The project is experimental. Basic Apply/Stop smoke tests have been run in nested GNOME 46 Wayland and GNOME 46/X11 sessions, but these do not validate the complete desktop experience, panel behavior, workspaces, screen lock, suspend/resume, or performance. GNOME 50/Wayland regression testing is also pending. See the [compatibility report](docs/engineering/compatibility.md); no platform should be considered officially supported until full validation is complete.
 
-## Build and run the application
+There is no stable public release yet. Package and CI artifacts are for development and validation.
 
-The renderer is activated through the app and the session D-Bus service. Apply
-requires the GnomeEngine Shell extension to be enabled; without it the renderer
-fails closed instead of opening a normal player window.
+## Development
 
-### 1. Check the session and tools
-
-Run these commands in a Linux terminal:
-
-```sh
-gnome-shell --version
-echo "$XDG_SESSION_TYPE"
-rustc --version
-cargo --version
-pkg-config --modversion gtk4
-pkg-config --modversion gstreamer-1.0
-gst-launch-1.0 --version
-```
-
-Compile success alone does not mean desktop wallpaper integration is
-supported; check the compatibility report before testing a platform.
-
-### 2. Install build and runtime dependencies
-
-On Ubuntu, the package names are:
-
-```sh
-sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  libgtk-4-media-gstreamer gstreamer1.0-tools gstreamer1.0-plugins-base \
-  gstreamer1.0-plugins-good
-```
-
-The renderer statically registers the upstream `gtk4paintablesink` plugin in
-its own process when the system plugin is absent. GTK's `GtkVideo` media backend
-remains a fallback, so Ubuntu 24.04 does not need the separately packaged
-`gstreamer1.0-gtk4` plugin. The sink is built with Wayland EGL, X11 EGL, X11
-GLX, and GTK 4.14 DMA-BUF features; the actual selected graphics path still
-requires runtime validation. Inspect available system elements if desired:
-
-```sh
-gst-inspect-1.0 gtk4paintablesink
-gst-inspect-1.0 playbin
-```
-
-Additional GStreamer decoder plugins may be needed for the codecs in your
-video. The renderer does not install codecs or other dependencies itself.
-On Ubuntu, `libgtk-4-media-gstreamer` supplies the GTK media playback backend.
-
-### 3. Build
-
-```sh
-cargo check --workspace
-```
-
-Build both the app and renderer before running the app, so its on-demand
-renderer launch fallback can find the sibling executable:
+To build and run the application during development, you need Rust/Cargo and the GTK4, Libadwaita, and GStreamer development libraries available on your system.
 
 ```sh
 cargo build --workspace
 cargo run -p gnomeengine
 ```
 
-To attempt desktop integration, the GnomeEngine Shell extension must be
-installed and enabled. The extension must confirm it can classify the renderer
-surface; otherwise Apply reports that desktop integration is unavailable and
-does not open a video-player window. See the current
-[compatibility matrix](docs/engineering/compatibility.md) before treating any
-environment as supported.
-
-Close the app window to exit the controller UI; this does not stop an active
-renderer. The detail preview is app-local and stops when leaving the detail
-page.
-
-The canonical fast checks used by CI are `./scripts/check.sh`. It requires
-Rust/Cargo and the native development libraries listed above; see
-[the testing strategy](docs/engineering/testing.md).
-
-## Build the Ubuntu package for validation
-
-The M5 package can be built on Ubuntu 24.04 or 26.04 amd64, but has not yet
-passed installed user-facing acceptance on either. With the build dependencies
-listed in `debian/control` installed, run:
+Run the project's checks with:
 
 ```sh
-./scripts/build-deb.sh
+./scripts/check.sh
 ```
 
-This creates a target-labelled candidate and `dist/SHA256SUMS` without
-installing anything. The current extension/package metadata target GNOME Shell
-50, so the candidate is named for Ubuntu 26.04 even when built on Noble (the
-older ABI baseline):
+The application can launch without the GNOME extension, but applying a wallpaper requires the GNOME integration to be available and enabled. The compatibility report and [manual testing guide](docs/engineering/manual-testing.md) explain what has been checked and what still needs testing.
 
-```sh
-ls -lh dist/gnomeengine_*_amd64.deb dist/SHA256SUMS
-```
+## Contributing
 
-Do not treat this build artifact as a supported release until the manual
-installation, launcher/Dock, upgrade/removal, and M7 runtime checks pass.
+Contributions are welcome! You can help with bug fixes, tests, documentation, accessibility, compatibility, or improvements to the application experience.
 
-## Architecture
+For larger changes, open an issue first so we can discuss the proposal. To contribute code, fork the repository, create a branch for your change, run `./scripts/check.sh`, and open a Pull Request describing the problem you addressed and how you tested it. GNOME integration changes may require testing in a real desktop session; clearly state which environments you used and which have not been validated.
 
-- `app/`: GTK4/Libadwaita desktop client and local wallpaper library.
-- `renderer/`: external Rust/GStreamer playback and lifecycle service.
-- `extension/`: minimal GNOME Shell desktop-surface and lifecycle integration.
+Start with the [architecture guide](ARCHITECTURE.md), [engineering principles](docs/engineering/principles.md), and [testing strategy](docs/engineering/testing.md). For wallpapers and other media, only submit content you created or are explicitly allowed to distribute, and include the asset's license information.
 
-See the [architecture map](ARCHITECTURE.md),
-[decision records](docs/decisions/README.md), and the
-[performance record](docs/performance.md).
+## License
 
-For contributor and coding-agent onboarding, start with [AGENTS.md](AGENTS.md)
-and the [architecture map](ARCHITECTURE.md). The product roadmap and engineering
-knowledge base live under [`docs/`](docs/).
+GnomeEngine's code is licensed under GPL-3.0-or-later. Media files may have different licenses; refer to each asset's license information.
 
-## Limitations
-
-- GNOME 46 nested Wayland Apply/Stop and GNOME 46/Xorg renderer EWMH Apply/Stop
-  smoke tests have passed, but the full desktop integration and lifecycle
-  acceptance is still open; GNOME 50/Wayland has not been regression-tested.
-- Battery, fullscreen, lock, suspend, Alt+Tab, Overview, workspaces,
-  multi-monitor and packaged GUI flows need manual validation on target systems.
-- Hardware decoding, DMA-BUF import, zero-copy behavior, and resource usage
-  have not been measured.
-- Only local video files are accepted; there are no downloads or scripts.
-
-## Short roadmap
-
-1. M7: establish Ubuntu 24.04/GNOME 46 Wayland, GNOME 46 X11, and Ubuntu
-   26.04/GNOME 50 Wayland compatibility, starting with the Noble Wayland path.
-2. Validate the experimental desktop bridge and lifecycle behavior on the
-   supported sessions before making user-facing support claims.
-3. Measure lifecycle/resource behavior on validated hardware and sessions.
-
-M5 packaging exists for validation. Its GNOME dependency and extension metadata
-remain limited to Shell 50 until the M7 matrix has passed runtime validation;
-Noble and Resolute package builds are included in CI.
+GnomeEngine is still under active development.
