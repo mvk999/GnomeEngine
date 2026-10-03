@@ -8,6 +8,7 @@ use gtk::prelude::*;
 use crate::lifecycle::{LifecyclePolicy, LifecyclePolicyConfig, PauseReason};
 
 pub const BUS_NAME: &str = "io.github.mvk999.GnomeEngine.Renderer";
+pub const GTK_APPLICATION_ID: &str = "io.github.mvk999.GnomeEngine.Renderer";
 pub const OBJECT_PATH: &str = "/io/github/mvk999/GnomeEngine/Renderer";
 pub const INTERFACE: &str = "io.github.mvk999.GnomeEngine.Renderer";
 
@@ -35,6 +36,7 @@ impl RendererState {
 struct ActivePlayback {
     backend: PlaybackBackend,
     window: gtk::Window,
+    _application: gtk::Application,
 }
 
 enum PlaybackBackend {
@@ -62,6 +64,7 @@ struct ControllerInner {
     state: RendererState,
     current_video: Option<String>,
     last_error: Option<String>,
+    desktop_integration_ready: bool,
     lifecycle: LifecyclePolicy,
     dbus_connection: Option<gio::DBusConnection>,
 }
@@ -81,6 +84,7 @@ impl RendererController {
             state: RendererState::Stopped,
             current_video: None,
             last_error: None,
+            desktop_integration_ready: false,
             lifecycle: LifecyclePolicy::with_config(config),
             dbus_connection: None,
         })))
@@ -115,8 +119,28 @@ impl RendererController {
         status.insert("lastError", inner.last_error.as_deref().unwrap_or_default());
         status.insert("pauseReasons", &reasons);
         status.insert("wallpaperActive", inner.active.is_some());
+        status.insert("desktopIntegrationReady", inner.desktop_integration_ready);
         status.insert("pauseOnBattery", inner.lifecycle.pause_on_battery());
         status.end()
+    }
+
+    pub fn set_desktop_integration_ready(&self, ready: bool) {
+        let changed = {
+            let mut inner = self.0.borrow_mut();
+            let changed = inner.desktop_integration_ready != ready;
+            inner.desktop_integration_ready = ready;
+            changed
+        };
+
+        if changed {
+            self.emit_signal("DesktopIntegrationChanged", &(ready,).to_variant());
+        }
+
+        // Fail closed if the Shell integration disappears: never leave a
+        // normal GTK player window behind as a substitute for the desktop.
+        if !ready && self.0.borrow().active.is_some() {
+            self.stop();
+        }
     }
 
     pub fn pause(&self) {
@@ -182,6 +206,13 @@ impl RendererController {
     }
 
     pub fn apply_video(&self, file_path: &str) -> Result<(), String> {
+        if !self.0.borrow().desktop_integration_ready {
+            return Err(
+                "GNOME desktop integration is not ready. Enable the GnomeEngine Shell extension before applying a wallpaper."
+                    .to_owned(),
+            );
+        }
+
         let path = Path::new(file_path);
         let metadata = std::fs::metadata(path)
             .map_err(|error| format!("cannot access video path: {error}"))?;
@@ -193,13 +224,36 @@ impl RendererController {
             .map_err(|error| format!("cannot resolve video path: {error}"))?;
 
         gtk::init().map_err(|error| format!("GTK initialization failed: {error}"))?;
+        let display = gdk::Display::default()
+            .ok_or_else(|| "no GDK display is available for the wallpaper surface".to_owned())?;
+        if !display.supports_input_shapes() {
+            return Err(
+                "the display backend cannot make the wallpaper surface input-transparent"
+                    .to_owned(),
+            );
+        }
+
+        let application =
+            gtk::Application::new(Some(GTK_APPLICATION_ID), gio::ApplicationFlags::NON_UNIQUE);
+        application
+            .register(None::<&gio::Cancellable>)
+            .map_err(|error| format!("cannot register renderer GTK application: {error}"))?;
         let (video_widget, pending_backend) = Self::build_video_output(&path)?;
         let window = gtk::Window::builder()
-            .title("GnomeEngine Renderer")
+            .title("GnomeEngine Wallpaper Surface")
             .default_width(960)
             .default_height(540)
+            .decorated(false)
             .child(&video_widget)
             .build();
+        window.set_application(Some(&application));
+        window.set_focusable(false);
+        let empty_input_region = gtk::cairo::Region::create();
+        window.connect_realize(move |window| {
+            if let Some(surface) = window.surface() {
+                surface.set_input_region(&empty_input_region);
+            }
+        });
 
         let backend = match pending_backend {
             PendingBackend::GStreamer(pipeline) => {
@@ -252,6 +306,7 @@ impl RendererController {
             inner.active = Some(ActivePlayback {
                 backend,
                 window: window.clone(),
+                _application: application,
             });
         }
         self.set_state(RendererState::Loading);
@@ -483,6 +538,30 @@ mod tests {
                 .lookup::<Vec<String>>("pauseReasons")
                 .unwrap(),
             Some(vec!["on-battery".to_owned(), "system-sleep".to_owned()])
+        );
+    }
+
+    #[test]
+    fn apply_is_rejected_before_creating_a_player_window_without_shell_integration() {
+        let controller = RendererController::new();
+
+        let error = controller.apply_video("/not/a/real/video.mp4").unwrap_err();
+
+        assert!(error.contains("GNOME desktop integration is not ready"));
+        assert!(!controller.0.borrow().desktop_integration_ready);
+        assert!(controller.0.borrow().active.is_none());
+    }
+
+    #[test]
+    fn desktop_integration_readiness_is_exposed_in_status() {
+        let controller = RendererController::new();
+        controller.set_desktop_integration_ready(true);
+
+        assert_eq!(
+            glib::VariantDict::new(Some(&controller.status_variant()))
+                .lookup::<bool>("desktopIntegrationReady")
+                .unwrap(),
+            Some(true)
         );
     }
 

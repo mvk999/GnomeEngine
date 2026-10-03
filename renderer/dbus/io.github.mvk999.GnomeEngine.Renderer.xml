@@ -16,6 +16,9 @@
     <method name="SetPauseOnBattery">
       <arg name="enabled" type="b" direction="in"/>
     </method>
+    <method name="SetDesktopIntegrationReady">
+      <arg name="ready" type="b" direction="in"/>
+    </method>
     <signal name="StateChanged">
       <arg name="state" type="s"/>
     </signal>
@@ -28,6 +31,9 @@
     <signal name="PolicyChanged">
       <arg name="policy" type="s"/>
       <arg name="enabled" type="b"/>
+    </signal>
+    <signal name="DesktopIntegrationChanged">
+      <arg name="ready" type="b"/>
     </signal>
   </interface>
 </node>

@@ -15,14 +15,15 @@ extension is limited to compositor integration and lifecycle events.
 ## Current state
 
 - The workspace contains a Rust `renderer` crate and the ES-module Shell
-  extension. The renderer now has a session-bus lifecycle service, but still
-  displays video in a normal GTK preview window.
+  extension. The renderer now has a guarded Mutter desktop-window bridge, but
+  target-session behavior has not been runtime-validated.
 - The renderer prefers GTK4, GStreamer `playbin`, and `gtk4paintablesink`, with
   GTK `GtkVideo` fallback when the optional sink plugin is absent; audio is
   muted and playback loops in a normal GTK window.
-- The extension now reports fullscreen, session lock, monitor topology, and
-  built-in-panel power lifecycle state over D-Bus. It does not discover or
-  place the renderer window as a desktop background.
+- The extension reports fullscreen, session lock, monitor topology, and
+  built-in-panel power lifecycle state over D-Bus. It now discovers the
+  renderer by GTK application ID, classifies it as a Mutter `DESKTOP` window,
+  and sizes it to the primary monitor on topology changes.
 - `./scripts/check.sh` passes after Rust/native development dependencies were
   installed; the GStreamer GTK paintable plugin is unavailable, so the new GTK
   media backend fallback is selected in code but still needs runtime playback
@@ -81,11 +82,13 @@ References:
 
 ## Chosen approach
 
-Proceed incrementally. First add a minimal GNOME 50 ES-module extension skeleton
-with symmetric enable/disable cleanup. Give the renderer a stable GTK
-application ID and use event-driven `Meta.Display::window-created` discovery,
-including one initial window enumeration on enable. Keep a GNOME background
-actor bridge behind a narrowly scoped integration module.
+Use a minimal GNOME 50 ES-module extension with symmetric enable/disable
+cleanup. The renderer has a stable GTK application ID; the extension discovers
+its surface through event-driven `Meta.Display::window-created` handling plus
+one initial window enumeration on enable. The current experimental bridge
+classifies that top-level with `Meta.Window.set_type(Meta.WindowType.DESKTOP)`;
+it does not reparent or clone compositor actors. This classification remains
+unaccepted until the target Wayland behavior is manually validated.
 
 No private Shell hook will be treated as accepted until its exact GNOME 50 API
 is inspected and the behavior is runtime-validated in a GNOME 50+ Wayland
@@ -120,13 +123,14 @@ Revisit TypeScript when the extension logic has enough surface to justify it.
    `io.github.mvk999.GnomeEngine.Renderer`; verify identity using Meta APIs, not
    the title.
 3. **Event-driven discovery** — connect `window-created`, inspect existing
-   windows at enable, wait for actor readiness using lifecycle signals, and
-   disconnect every signal on disable.
-4. **Background bridge** — after GNOME 50 API verification, attach/clone only
-   the renderer actor into the appropriate background layer; prevent focus and
-   input; handle monitor topology without assuming monitor 0.
-5. **Lifecycle hardening** — renderer close/crash, extension reload, monitor
-   changes, and safe restoration of the ordinary static background.
+   windows at enable, and disconnect per-window signals on teardown. Done in
+   the current implementation.
+4. **Background bridge** — use guarded `Meta.WindowType.DESKTOP` classification,
+   an integration-ready D-Bus handshake, a non-focusable GTK surface, and an
+   empty input region. Implemented; target runtime validation remains open.
+5. **Lifecycle hardening** — basic fail-closed teardown and topology
+   recalculation are implemented; renderer crash/reload and target monitor
+   behavior still require manual validation.
 6. **Documentation and validation** — record chosen Shell API and limitations;
    complete the manual GNOME checklist; move this plan to completed only when
    the acceptance criteria have been validated.
@@ -162,8 +166,8 @@ and guarded so failures cannot modify ordinary application actors.
 ## Acceptance criteria
 
 - [ ] Extension targets GNOME 50+ and has a reversible enable/disable lifecycle.
-- [ ] Renderer is identified by its stable GTK application ID.
-- [ ] Discovery is signal-driven and handles renderer-before-extension startup.
+- [x] Renderer is identified by its stable GTK application ID.
+- [x] Discovery is signal-driven and handles renderer-before-extension startup.
 - [ ] Renderer video appears as the desktop background, with no normal window.
 - [ ] Renderer is absent from Alt+Tab and Overview and receives no focus/input.
 - [ ] Panel, notifications, normal windows, and workspace switching work.
@@ -177,26 +181,33 @@ and guarded so failures cannot modify ordinary application actors.
 
 - [x] Repository and existing renderer inspected.
 - [x] Rust/GStreamer renderer now builds and canonical checks pass.
-- [x] Renderer lifecycle D-Bus protocol exists; real background bridge remains
-  unimplemented and unvalidated.
+- [x] Renderer lifecycle D-Bus protocol exists.
 - [x] GNOME/Mutter API research recorded.
 - [x] Add extension lifecycle skeleton.
-- [ ] Set stable renderer GTK application ID.
-- [ ] Implement event-driven renderer window discovery.
-- [ ] Establish and validate GNOME 50 background actor integration.
+- [x] Set stable renderer GTK application ID and make its surface input-transparent.
+- [x] Implement event-driven renderer discovery and Mutter desktop classification.
+- [ ] Validate GNOME 50+ Wayland background stacking and recovery behavior.
 - [ ] Complete target-session manual checks.
 
 ## Discoveries
 
-- Public Mutter APIs support event-driven top-level window discovery and actor
-  lookup, but the reviewed documentation does not expose a public operation to
-  make an external surface a GNOME desktop background.
-- Existing reference behavior suggests private Shell background hooks may be
-  involved. This is a critical compatibility risk, not yet a chosen runtime
-  implementation.
+- Mutter documents `Meta.Window.set_type()` and `Meta.WindowType.DESKTOP`. The
+  implementation avoids private Shell actor reparenting, but changing a
+  Wayland toplevel's type remains version-sensitive and needs target testing.
+- GDK's input-region API prevents the wallpaper surface from receiving pointer
+  input; Apply fails closed when the active backend reports no input-shape
+  support.
+- The readiness handshake prevents Apply from falling back to an ordinary
+  visible GTK player when the extension is absent.
 - The current development environment cannot validate the milestone's target
   platform; a GNOME 50+ Wayland session and Rust toolchain are required for final
   acceptance.
+- The package was unpacked with `dpkg-deb -x` for a smoke test, not installed.
+  Files extracted under a temporary directory are not thereby registered with
+  the already-running GNOME Shell. The host is GNOME 46/X11 and remains outside
+  the chosen support target; Apply correctly fails closed there. The app now
+  reports this platform mismatch rather than incorrectly telling the user only
+  to enable an extension.
 - The extension skeleton uses GNOME's ES-module `Extension` lifecycle and is
   syntax-checked through the canonical repository check script; it performs no
   shell work while idle.

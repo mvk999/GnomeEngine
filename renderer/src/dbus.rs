@@ -30,7 +30,7 @@ fn dispatch_method(
             Some((path,)) => match controller.apply_video(&path) {
                 Ok(()) => invocation.return_value(None),
                 Err(error) => {
-                    invocation.return_dbus_error("org.freedesktop.DBus.Error.InvalidArgs", &error)
+                    invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &error)
                 }
             },
             None => invocation.return_dbus_error(
@@ -78,6 +78,16 @@ fn dispatch_method(
                 "SetPauseOnBattery requires an enabled boolean",
             ),
         },
+        "SetDesktopIntegrationReady" => match parameters.get::<(bool,)>() {
+            Some((ready,)) => {
+                controller.set_desktop_integration_ready(ready);
+                invocation.return_value(None);
+            }
+            None => invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "SetDesktopIntegrationReady requires a boolean",
+            ),
+        },
         _ => invocation.return_dbus_error(
             "org.freedesktop.DBus.Error.UnknownMethod",
             "unknown renderer method",
@@ -94,6 +104,12 @@ mod tests {
         let node = gio::DBusNodeInfo::for_xml(INTERFACE_XML).unwrap();
         let interface = node.lookup_interface(crate::controller::INTERFACE).unwrap();
         assert!(interface.lookup_method("SetPauseOnBattery").is_some());
+        assert!(interface
+            .lookup_method("SetDesktopIntegrationReady")
+            .is_some());
         assert!(interface.lookup_signal("PolicyChanged").is_some());
+        assert!(interface
+            .lookup_signal("DesktopIntegrationChanged")
+            .is_some());
     }
 }

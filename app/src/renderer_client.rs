@@ -6,7 +6,13 @@ const BUS_NAME: &str = "io.github.mvk999.GnomeEngine.Renderer";
 const OBJECT_PATH: &str = "/io/github/mvk999/GnomeEngine/Renderer";
 const INTERFACE: &str = "io.github.mvk999.GnomeEngine.Renderer";
 type ApplyCompletion = Box<dyn FnOnce(Result<(), String>)>;
-type PendingApply = (String, ApplyCompletion);
+const INTEGRATION_TIMEOUT_SECONDS: u32 = 8;
+
+struct PendingApply {
+    path: String,
+    callback: ApplyCompletion,
+    timeout: glib::SourceId,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RendererStatus {
@@ -17,6 +23,8 @@ pub struct RendererStatus {
     pub pause_reasons: Vec<String>,
     pub pause_on_battery: bool,
     pub wallpaper_active: bool,
+    pub desktop_integration_supported: bool,
+    pub desktop_integration_ready: bool,
 }
 
 impl Default for RendererStatus {
@@ -29,6 +37,8 @@ impl Default for RendererStatus {
             pause_reasons: Vec::new(),
             pause_on_battery: true,
             wallpaper_active: false,
+            desktop_integration_supported: false,
+            desktop_integration_ready: false,
         }
     }
 }
@@ -90,7 +100,25 @@ impl RendererClient {
 
     pub fn apply_video(&self, path: String, callback: impl Fn(Result<(), String>) + 'static) {
         let callback: ApplyCompletion = Box::new(callback);
-        if let Some(connection) = self.0.borrow().connection.clone() {
+        // End the RefCell borrow before entering either branch. The async GTK
+        // callback can re-enter this client while installing pending Apply.
+        let existing_connection = { self.0.borrow().connection.clone() };
+        if let Some(connection) = existing_connection {
+            let status = self.status();
+            if !status.desktop_integration_ready {
+                if status.available
+                    && status.state != "loading-status"
+                    && !status.desktop_integration_supported
+                {
+                    callback(Err(
+                        "Renderer is incompatible with desktop integration; restart it before applying".to_owned(),
+                    ));
+                    return;
+                }
+                self.queue_apply_until_ready(path, callback);
+                query_status(&connection, Rc::downgrade(&self.0));
+                return;
+            }
             let client = self.clone();
             call_apply(
                 connection,
@@ -105,15 +133,89 @@ impl RendererClient {
             return;
         }
 
-        let previous = self.0.borrow_mut().pending_apply.replace((path, callback));
-        if let Some((_, previous)) = previous {
-            previous(Err("A newer Apply request replaced this one".to_owned()));
+        // GetStatus activates the installed D-Bus service without sending
+        // ApplyVideo before the Shell extension has prepared the desktop
+        // surface. In a development checkout without a D-Bus service file,
+        // the renderer executable is started as a local fallback.
+        let client = self.clone();
+        gio::bus_get(
+            gio::BusType::Session,
+            None::<&gio::Cancellable>,
+            move |connection| match connection {
+                Ok(connection) => {
+                    client.queue_apply_until_ready(path, callback);
+                    let activating_client = client.clone();
+                    connection.call(
+                        Some(BUS_NAME),
+                        OBJECT_PATH,
+                        INTERFACE,
+                        "GetStatus",
+                        None,
+                        None,
+                        gio::DBusCallFlags::NONE,
+                        5000,
+                        None::<&gio::Cancellable>,
+                        move |result| {
+                            if let Err(error) = result {
+                                let remote_error = gio::DBusError::remote_error(&error);
+                                if is_missing_activation_error(remote_error.as_deref()) {
+                                    activating_client.start_renderer_for_apply();
+                                } else {
+                                    activating_client.fail_pending_apply(format!(
+                                        "could not activate renderer: {error}"
+                                    ));
+                                }
+                            }
+                        },
+                    );
+                }
+                Err(error) => callback(Err(format!(
+                    "Could not connect to the session bus: {error}"
+                ))),
+            },
+        );
+    }
+
+    fn queue_apply_until_ready(&self, path: String, callback: ApplyCompletion) {
+        let weak = Rc::downgrade(&self.0);
+        let timeout = glib::timeout_add_seconds_local_once(
+            INTEGRATION_TIMEOUT_SECONDS,
+            move || {
+                if let Some(inner) = weak.upgrade() {
+                    let pending = { inner.borrow_mut().pending_apply.take() };
+                    if let Some(pending) = pending {
+                        (pending.callback)(Err(
+                        "GNOME desktop integration was not confirmed; Apply was canceled to avoid opening a video window".to_owned(),
+                    ));
+                    }
+                }
+            },
+        );
+        let previous = self.0.borrow_mut().pending_apply.replace(PendingApply {
+            path,
+            callback,
+            timeout,
+        });
+        if let Some(previous) = previous {
+            previous.timeout.remove();
+            (previous.callback)(Err("A newer Apply request replaced this one".to_owned()));
+        }
+        if self.status().desktop_integration_ready {
+            try_pending_apply(&self.0);
+        }
+    }
+
+    fn start_renderer_for_apply(&self) {
+        if self.0.borrow().pending_apply.is_none() {
+            return;
         }
         if let Err(error) = self.start_renderer() {
-            if let Some((_, callback)) = self.0.borrow_mut().pending_apply.take() {
-                callback(Err(error));
-            }
+            self.fail_pending_apply(error);
         }
+    }
+
+    fn fail_pending_apply(&self, error: String) {
+        fail_pending_apply(&self.0, error);
     }
 
     pub fn stop(&self, callback: impl Fn(Result<(), String>) + 'static) {
@@ -195,12 +297,13 @@ impl RendererClient {
                 state.renderer_process = None;
                 state.pending_apply.take()
             };
-            if let Some((_, callback)) = pending {
+            if let Some(pending) = pending {
+                pending.timeout.remove();
                 let detail = result
                     .err()
                     .map(|error| error.to_string())
                     .unwrap_or_else(|| "renderer exited before becoming available".to_owned());
-                callback(Err(format!("Renderer failed to start: {detail}")));
+                (pending.callback)(Err(format!("Renderer failed to start: {detail}")));
             }
         });
         Ok(())
@@ -213,6 +316,10 @@ fn renderer_executable() -> Option<PathBuf> {
     } else {
         "gnomeengine-renderer"
     };
+    let installed = PathBuf::from("/usr/libexec/gnomeengine").join(executable_name);
+    if installed.is_file() {
+        return Some(installed);
+    }
     if let Ok(current) = std::env::current_exe() {
         if let Some(parent) = current.parent() {
             let sibling = parent.join(executable_name);
@@ -227,6 +334,18 @@ fn renderer_executable() -> Option<PathBuf> {
 }
 
 fn call_apply(connection: gio::DBusConnection, path: String, callback: ApplyCompletion) {
+    call_apply_with_dbus_error(
+        connection,
+        path,
+        Box::new(move |result| callback(result.map_err(|error| error.to_string()))),
+    );
+}
+
+fn call_apply_with_dbus_error(
+    connection: gio::DBusConnection,
+    path: String,
+    callback: Box<dyn FnOnce(Result<(), glib::Error>)>,
+) {
     connection.call(
         Some(BUS_NAME),
         OBJECT_PATH,
@@ -237,8 +356,20 @@ fn call_apply(connection: gio::DBusConnection, path: String, callback: ApplyComp
         gio::DBusCallFlags::NONE,
         30_000,
         None::<&gio::Cancellable>,
-        move |result| callback(result.map(|_| ()).map_err(|error| error.to_string())),
+        move |result| callback(result.map(|_| ())),
     );
+}
+
+fn is_missing_activation_error(error_name: Option<&str>) -> bool {
+    matches!(
+        error_name,
+        Some(
+            "org.freedesktop.DBus.Error.ServiceUnknown"
+                | "org.freedesktop.DBus.Error.Spawn.ServiceNotFound"
+                | "org.freedesktop.DBus.Error.Spawn.ExecFailed"
+                | "org.freedesktop.DBus.Error.Spawn.FileNotFound"
+        )
+    )
 }
 
 fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnection) {
@@ -249,6 +380,7 @@ fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnec
         "PlaybackError",
         "PauseReasonsChanged",
         "PolicyChanged",
+        "DesktopIntegrationChanged",
     ] {
         let weak = Rc::downgrade(inner);
         subscriptions.push(connection.signal_subscribe(
@@ -294,9 +426,18 @@ fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnec
                             }
                         }
                     }
+                    "DesktopIntegrationChanged" => {
+                        if let Some((ready,)) = parameters.get::<(bool,)>() {
+                            status.desktop_integration_supported = true;
+                            status.desktop_integration_ready = ready;
+                        }
+                    }
                     _ => {}
                 }
                 publish(&inner, status);
+                if member == "DesktopIntegrationChanged" {
+                    try_pending_apply(&inner);
+                }
             },
         ));
     }
@@ -310,20 +451,6 @@ fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnec
         status.state = "loading-status".to_owned();
         drop(state);
         publish(inner, status);
-    }
-    if let Some((path, callback)) = inner.borrow_mut().pending_apply.take() {
-        let weak = Rc::downgrade(inner);
-        let callback_connection = connection.clone();
-        call_apply(
-            connection.clone(),
-            path,
-            Box::new(move |result| {
-                if result.is_ok() {
-                    query_status(&callback_connection, weak);
-                }
-                callback(result);
-            }),
-        );
     }
     query_status(&connection, Rc::downgrade(inner));
 }
@@ -347,7 +474,16 @@ fn query_status(connection: &gio::DBusConnection, weak: std::rc::Weak<RefCell<Cl
                 Ok(reply) => match parse_status(&reply) {
                     Ok(mut status) => {
                         status.available = true;
+                        let integration_supported = status.desktop_integration_supported;
                         publish(&inner, status);
+                        if integration_supported {
+                            try_pending_apply(&inner);
+                        } else {
+                            fail_pending_apply(
+                                &inner,
+                                "Renderer is incompatible with desktop integration; restart it before applying".to_owned(),
+                            );
+                        }
                     }
                     Err(error) => {
                         eprintln!("gnomeengine: invalid renderer status: {error}");
@@ -355,6 +491,10 @@ fn query_status(connection: &gio::DBusConnection, weak: std::rc::Weak<RefCell<Cl
                         status.state = "error".to_owned();
                         status.last_error = Some("Could not read renderer status".to_owned());
                         publish(&inner, status);
+                        fail_pending_apply(
+                            &inner,
+                            "Renderer is incompatible with this version of GnomeEngine; restart the renderer and try again".to_owned(),
+                        );
                     }
                 },
                 Err(error) => {
@@ -385,11 +525,50 @@ fn disconnect_service(inner: &Rc<RefCell<ClientInner>>) {
         }
     }
     inner.borrow_mut().renderer_process = None;
-    if let Some((_, callback)) = pending {
-        callback(Err("Renderer service disconnected".to_owned()));
+    if let Some(pending) = pending {
+        pending.timeout.remove();
+        (pending.callback)(Err("Renderer service disconnected".to_owned()));
     }
     let status = RendererStatus::default();
     publish(inner, status);
+}
+
+fn try_pending_apply(inner: &Rc<RefCell<ClientInner>>) {
+    let connection = {
+        let state = inner.borrow();
+        if !state.status.desktop_integration_ready {
+            return;
+        }
+        state.connection.clone()
+    };
+    let Some(connection) = connection else {
+        return;
+    };
+    let pending = inner.borrow_mut().pending_apply.take();
+    let Some(pending) = pending else {
+        return;
+    };
+    pending.timeout.remove();
+    let weak = Rc::downgrade(inner);
+    let callback_connection = connection.clone();
+    call_apply(
+        connection,
+        pending.path,
+        Box::new(move |result| {
+            if result.is_ok() {
+                query_status(&callback_connection, weak);
+            }
+            (pending.callback)(result);
+        }),
+    );
+}
+
+fn fail_pending_apply(inner: &Rc<RefCell<ClientInner>>, error: String) {
+    let pending = { inner.borrow_mut().pending_apply.take() };
+    if let Some(pending) = pending {
+        pending.timeout.remove();
+        (pending.callback)(Err(error));
+    }
 }
 
 fn publish(inner: &Rc<RefCell<ClientInner>>, status: RendererStatus) {
@@ -434,6 +613,14 @@ fn parse_status(reply: &glib::Variant) -> Result<RendererStatus, String> {
         pause_reasons: array("pauseReasons")?,
         pause_on_battery: boolean("pauseOnBattery")?,
         wallpaper_active: boolean("wallpaperActive")?,
+        desktop_integration_supported: dict
+            .lookup::<bool>("desktopIntegrationReady")
+            .map_err(|_| "GetStatus field desktopIntegrationReady has the wrong type".to_owned())?
+            .is_some(),
+        desktop_integration_ready: dict
+            .lookup::<bool>("desktopIntegrationReady")
+            .map_err(|_| "GetStatus field desktopIntegrationReady has the wrong type".to_owned())?
+            .unwrap_or(false),
     })
 }
 
@@ -443,7 +630,7 @@ fn optional_string(value: String) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_status;
+    use super::{is_missing_activation_error, parse_status};
     use glib::prelude::ToVariant;
     use std::collections::HashMap;
 
@@ -458,6 +645,7 @@ mod tests {
                 vec!["on-battery".to_owned()].to_variant(),
             ),
             ("wallpaperActive".into(), true.to_variant()),
+            ("desktopIntegrationReady".into(), true.to_variant()),
             ("pauseOnBattery".into(), true.to_variant()),
         ]);
         let reply = glib::Variant::tuple_from_iter([fields.to_variant()]);
@@ -467,6 +655,8 @@ mod tests {
         assert_eq!(status.pause_reasons, ["on-battery"]);
         assert!(status.pause_on_battery);
         assert!(status.wallpaper_active);
+        assert!(status.desktop_integration_supported);
+        assert!(status.desktop_integration_ready);
         assert!(status.last_error.is_none());
     }
 
@@ -475,5 +665,36 @@ mod tests {
         let reply =
             glib::Variant::tuple_from_iter([HashMap::<String, glib::Variant>::new().to_variant()]);
         assert!(parse_status(&reply).is_err());
+    }
+
+    #[test]
+    fn identifies_legacy_renderer_status_without_desktop_handshake() {
+        let fields: HashMap<String, glib::Variant> = HashMap::from([
+            ("state".into(), "playing".to_variant()),
+            ("currentVideo".into(), "/library/a.mp4".to_variant()),
+            ("lastError".into(), "".to_variant()),
+            ("pauseReasons".into(), Vec::<String>::new().to_variant()),
+            ("wallpaperActive".into(), true.to_variant()),
+            ("pauseOnBattery".into(), true.to_variant()),
+        ]);
+        let reply = glib::Variant::tuple_from_iter([fields.to_variant()]);
+        let status = parse_status(&reply).unwrap();
+        assert!(!status.desktop_integration_supported);
+        assert!(!status.desktop_integration_ready);
+        assert!(status.wallpaper_active);
+    }
+
+    #[test]
+    fn only_activation_failures_allow_the_development_spawn_fallback() {
+        assert!(is_missing_activation_error(Some(
+            "org.freedesktop.DBus.Error.ServiceUnknown"
+        )));
+        assert!(is_missing_activation_error(Some(
+            "org.freedesktop.DBus.Error.Spawn.ExecFailed"
+        )));
+        assert!(!is_missing_activation_error(Some(
+            "org.freedesktop.DBus.Error.InvalidArgs"
+        )));
+        assert!(!is_missing_activation_error(None));
     }
 }
