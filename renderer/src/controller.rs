@@ -33,9 +33,28 @@ impl RendererState {
 }
 
 struct ActivePlayback {
-    _bus_watch: gst::bus::BusWatchGuard,
-    pipeline: gst::Element,
+    backend: PlaybackBackend,
     window: gtk::Window,
+}
+
+enum PlaybackBackend {
+    GStreamer {
+        _bus_watch: gst::bus::BusWatchGuard,
+        pipeline: gst::Element,
+    },
+    GtkMedia {
+        stream: gtk::MediaStream,
+    },
+}
+
+enum PendingBackend {
+    GStreamer(gst::Element),
+    GtkMedia(gtk::MediaStream),
+}
+
+enum PlaybackControl {
+    GStreamer(gst::Element),
+    GtkMedia(gtk::MediaStream),
 }
 
 struct ControllerInner {
@@ -174,48 +193,55 @@ impl RendererController {
             .map_err(|error| format!("cannot resolve video path: {error}"))?;
 
         gtk::init().map_err(|error| format!("GTK initialization failed: {error}"))?;
-        let (pipeline, paintable) = Self::build_pipeline(&path)?;
-        let picture = gtk::Picture::for_paintable(&paintable);
-        picture.set_can_shrink(true);
-        picture.set_content_fit(gtk::ContentFit::Cover);
+        let (video_widget, pending_backend) = Self::build_video_output(&path)?;
         let window = gtk::Window::builder()
             .title("GnomeEngine Renderer")
             .default_width(960)
             .default_height(540)
-            .child(&picture)
+            .child(&video_widget)
             .build();
 
-        let bus = pipeline
-            .bus()
-            .ok_or_else(|| "GStreamer pipeline has no bus".to_owned())?;
-        let weak_controller = Rc::downgrade(&self.0);
-        let watched_pipeline = pipeline.clone();
-        let bus_watch = bus
-            .add_watch_local(move |_, message| {
-                use gst::MessageView;
-                match message.view() {
-                    MessageView::Eos(..) => {
-                        if let Err(error) = watched_pipeline.seek_simple(
-                            gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
-                            gst::ClockTime::ZERO,
-                        ) {
-                            if let Some(inner) = weak_controller.upgrade() {
-                                RendererController(inner).playback_error(error.to_string());
+        let backend = match pending_backend {
+            PendingBackend::GStreamer(pipeline) => {
+                let bus = pipeline
+                    .bus()
+                    .ok_or_else(|| "GStreamer pipeline has no bus".to_owned())?;
+                let weak_controller = Rc::downgrade(&self.0);
+                let watched_pipeline = pipeline.clone();
+                let bus_watch = bus
+                    .add_watch_local(move |_, message| {
+                        use gst::MessageView;
+                        match message.view() {
+                            MessageView::Eos(..) => {
+                                if let Err(error) = watched_pipeline.seek_simple(
+                                    gst::SeekFlags::FLUSH | gst::SeekFlags::KEY_UNIT,
+                                    gst::ClockTime::ZERO,
+                                ) {
+                                    if let Some(inner) = weak_controller.upgrade() {
+                                        RendererController(inner).playback_error(error.to_string());
+                                    }
+                                    return glib::ControlFlow::Break;
+                                }
                             }
-                            return glib::ControlFlow::Break;
+                            MessageView::Error(error) => {
+                                if let Some(inner) = weak_controller.upgrade() {
+                                    RendererController(inner)
+                                        .playback_error(error.error().to_string());
+                                }
+                                return glib::ControlFlow::Break;
+                            }
+                            _ => {}
                         }
-                    }
-                    MessageView::Error(error) => {
-                        if let Some(inner) = weak_controller.upgrade() {
-                            RendererController(inner).playback_error(error.error().to_string());
-                        }
-                        return glib::ControlFlow::Break;
-                    }
-                    _ => {}
+                        glib::ControlFlow::Continue
+                    })
+                    .map_err(|error| format!("cannot watch GStreamer bus: {error}"))?;
+                PlaybackBackend::GStreamer {
+                    _bus_watch: bus_watch,
+                    pipeline,
                 }
-                glib::ControlFlow::Continue
-            })
-            .map_err(|error| format!("cannot watch GStreamer bus: {error}"))?;
+            }
+            PendingBackend::GtkMedia(stream) => PlaybackBackend::GtkMedia { stream },
+        };
 
         self.stop_active_pipeline();
         let video_name = path.to_string_lossy().into_owned();
@@ -224,23 +250,58 @@ impl RendererController {
             inner.current_video = Some(video_name);
             inner.last_error = None;
             inner.active = Some(ActivePlayback {
-                _bus_watch: bus_watch,
-                pipeline: pipeline.clone(),
+                backend,
                 window: window.clone(),
             });
         }
         self.set_state(RendererState::Loading);
+        let media_stream = self.0.borrow().active.as_ref().and_then(|active| {
+            if let PlaybackBackend::GtkMedia { stream } = &active.backend {
+                Some(stream.clone())
+            } else {
+                None
+            }
+        });
+        if let Some(stream) = media_stream {
+            let weak_controller = Rc::downgrade(&self.0);
+            stream.connect_error_notify(move |stream| {
+                if let Some(error) = stream.error() {
+                    if let Some(inner) = weak_controller.upgrade() {
+                        RendererController(inner).playback_error(error.to_string());
+                    }
+                }
+            });
+            eprintln!("INFO renderer using GTK media backend (gtk4paintablesink unavailable)");
+        }
         window.present();
         self.reconcile_playback();
         eprintln!("INFO renderer initialized; GStreamer autoplugging enabled");
         Ok(())
     }
 
-    fn build_pipeline(path: &Path) -> Result<(gst::Element, gdk::Paintable), String> {
+    fn build_video_output(path: &Path) -> Result<(gtk::Widget, PendingBackend), String> {
+        if gst::ElementFactory::find("gtk4paintablesink").is_none() {
+            let video = gtk::Video::for_filename(Some(path));
+            video.set_autoplay(false);
+            video.set_loop(true);
+            video.set_hexpand(true);
+            video.set_vexpand(true);
+            let stream = video
+                .media_stream()
+                .ok_or_else(|| "GTK could not create a media stream for this video".to_owned())?;
+            stream.set_muted(true);
+            return Ok((video.upcast(), PendingBackend::GtkMedia(stream)));
+        }
+
         let sink = gst::ElementFactory::make("gtk4paintablesink")
             .build()
             .map_err(|error| format!("cannot create GTK GStreamer sink: {error}"))?;
         let paintable = sink.property::<gdk::Paintable>("paintable");
+        let picture = gtk::Picture::for_paintable(&paintable);
+        picture.set_can_shrink(true);
+        picture.set_content_fit(gtk::ContentFit::Cover);
+        picture.set_hexpand(true);
+        picture.set_vexpand(true);
         let pipeline = gst::ElementFactory::make("playbin")
             .build()
             .map_err(|error| format!("cannot create GStreamer playbin: {error}"))?;
@@ -252,7 +313,7 @@ impl RendererController {
             .build()
             .map_err(|error| format!("cannot create audio fakesink: {error}"))?;
         pipeline.set_property("audio-sink", &audio_sink);
-        Ok((pipeline, paintable))
+        Ok((picture.upcast(), PendingBackend::GStreamer(pipeline)))
     }
 
     pub fn stop(&self) {
@@ -281,8 +342,13 @@ impl RendererController {
     fn stop_active_pipeline(&self) {
         let active = self.0.borrow_mut().active.take();
         if let Some(active) = active {
-            if let Err(error) = active.pipeline.set_state(gst::State::Null) {
-                eprintln!("gnomeengine-renderer: failed to stop pipeline: {error}");
+            match &active.backend {
+                PlaybackBackend::GStreamer { pipeline, .. } => {
+                    if let Err(error) = pipeline.set_state(gst::State::Null) {
+                        eprintln!("gnomeengine-renderer: failed to stop pipeline: {error}");
+                    }
+                }
+                PlaybackBackend::GtkMedia { stream } => stream.pause(),
             }
             active.window.close();
             drop(active);
@@ -290,7 +356,7 @@ impl RendererController {
     }
 
     fn reconcile_playback(&self) {
-        let (pipeline, paused) = {
+        let (backend, paused) = {
             let inner = self.0.borrow();
             if inner.state == RendererState::Error {
                 return;
@@ -298,17 +364,34 @@ impl RendererController {
             let Some(active) = inner.active.as_ref() else {
                 return;
             };
-            (active.pipeline.clone(), inner.lifecycle.is_paused())
+            let backend = match &active.backend {
+                PlaybackBackend::GStreamer { pipeline, .. } => {
+                    PlaybackControl::GStreamer(pipeline.clone())
+                }
+                PlaybackBackend::GtkMedia { stream } => PlaybackControl::GtkMedia(stream.clone()),
+            };
+            (backend, inner.lifecycle.is_paused())
         };
 
-        let target = if paused {
-            gst::State::Paused
-        } else {
-            gst::State::Playing
-        };
-        if let Err(error) = pipeline.set_state(target) {
-            self.playback_error(format!("cannot change GStreamer state: {error}"));
-            return;
+        match backend {
+            PlaybackControl::GStreamer(pipeline) => {
+                let target = if paused {
+                    gst::State::Paused
+                } else {
+                    gst::State::Playing
+                };
+                if let Err(error) = pipeline.set_state(target) {
+                    self.playback_error(format!("cannot change GStreamer state: {error}"));
+                    return;
+                }
+            }
+            PlaybackControl::GtkMedia(stream) => {
+                if paused {
+                    stream.pause();
+                } else {
+                    stream.play();
+                }
+            }
         }
         self.set_state(if paused {
             RendererState::Paused

@@ -12,6 +12,10 @@ implementing media demuxing, codec selection, or frame timing itself.
 The prototype uses GStreamer `playbin` with `gtk4paintablesink`; audio is sent
 to `fakesink`. GStreamer autoplugging selects the available decode path.
 
+Implementation note: where the optional GTK4 paintable sink is not packaged,
+the renderer uses GTK's `GtkVideo` media backend (also backed by GStreamer) to
+preserve the same muted, looped playback and lifecycle controls.
+
 ## Consequences
 
 The prototype reuses the system media stack and keeps codec logic out of the

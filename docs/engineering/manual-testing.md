@@ -8,7 +8,9 @@ session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
 
 ## Current prototype smoke check
 
-1. Confirm the GTK4 `gtk4paintablesink` plugin is discoverable.
+1. Check whether `gtk4paintablesink` is discoverable. If it is absent, confirm
+   the platform's GTK media backend is installed; the renderer should select
+   the GtkVideo fallback and report that choice in its log.
 2. Run the renderer with a local video containing a video stream.
 3. Confirm the GTK window displays video, audio is discarded, and playback
    seeks to the beginning after end-of-stream.
@@ -76,6 +78,7 @@ controls the renderer's ordinary GTK preview window, not the GNOME background.
   renderer/preview process or persistent app process after quitting.
 
 The host used for implementation is GNOME Shell 46 on X11; Gtk4's
-`gtk4paintablesink` plugin is unavailable. Mark graphical/runtime items above
-not validated on this host rather than treating compilation or unit tests as
-visual validation.
+`gtk4paintablesink` plugin is unavailable, although GTK's GStreamer media
+backend is installed. The fallback compiles but still needs graphical runtime
+validation. Mark graphical/runtime items above not validated on this host
+rather than treating compilation or unit tests as visual validation.

@@ -203,6 +203,11 @@ clean only app-owned staging directories.
   repository evidence while keeping M1 marked incomplete.
 - `ApplyVideo` currently opens a normal GTK window, so an app integration test
   can validate D-Bus control but cannot validate desktop wallpaper behavior.
+- The first Apply attempt reported a missing `gtk4paintablesink`. Ubuntu 24.04
+  has GTK's GStreamer media backend installed but this optional GStreamer-RS GTK4
+  sink is not available from the configured package set. The renderer now uses
+  `GtkVideo`/`GtkMediaStream` as a fallback; compilation is verified, while
+  playback runtime still needs the user-session smoke test.
 - The initial blank GUI was caused by GtkStack's default first-child selection:
   the empty detail widget was inserted before Library. The import action also
   switched to Library before opening the chooser, masking this initial-state

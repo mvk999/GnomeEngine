@@ -11,6 +11,7 @@ Current component details live in:
 - [GNOME integration design](design/gnome-integration.md)
 - [Packaging direction](design/packaging.md)
 
-The original renderer PoC uses GStreamer `playbin` and `gtk4paintablesink` to
-show a local video in a normal GTK window. The paintable preview is not a GNOME
-desktop background.
+The renderer prefers GStreamer `playbin` and `gtk4paintablesink`, with GTK's
+`GtkVideo` media backend as a fallback when that optional sink is unavailable.
+Both currently display in a normal GTK window, not as a GNOME desktop
+background.

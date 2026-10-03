@@ -27,7 +27,8 @@ background.
 - Rust and Cargo
 - GTK4 development libraries
 - Libadwaita development libraries
-- GStreamer development libraries and the GTK4 sink plugin
+- GStreamer development libraries and video decoder plugins
+- GTK's GStreamer media backend (`libgtk-4-media-gstreamer` on Ubuntu)
 
 Dependencies are not installed automatically.
 
@@ -59,14 +60,16 @@ print `wayland`.
 On Ubuntu, the package names are:
 
 ```sh
-sudo apt install build-essential pkg-config libgtk-4-dev \
+sudo apt install build-essential pkg-config libgtk-4-dev libadwaita-1-dev \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  gstreamer1.0-tools gstreamer1.0-gtk4 gstreamer1.0-plugins-base \
+  libgtk-4-media-gstreamer gstreamer1.0-tools gstreamer1.0-plugins-base \
   gstreamer1.0-plugins-good
 ```
 
-The `gtk4paintablesink` element comes from the GTK4 GStreamer plugin. Confirm
-that GStreamer can find it before building:
+The renderer prefers GStreamer's `gtk4paintablesink` element when installed.
+When it is unavailable, it falls back to GTK's `GtkVideo` media backend, so
+Ubuntu 24.04 does not need a separately packaged GTK4 sink plugin. Check the
+preferred sink if desired:
 
 ```sh
 gst-inspect-1.0 gtk4paintablesink
@@ -75,7 +78,7 @@ gst-inspect-1.0 playbin
 
 Additional GStreamer decoder plugins may be needed for the codecs in your
 video. The renderer does not install codecs or other dependencies itself.
-Ubuntu publishes the GTK4 sink plugin as [`gstreamer1.0-gtk4`](https://packages.ubuntu.com/search?keywords=gstreamer1.0-gtk4).
+On Ubuntu, `libgtk-4-media-gstreamer` supplies the GTK media playback backend.
 
 ### 3. Build
 

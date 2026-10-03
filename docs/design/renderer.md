@@ -2,10 +2,14 @@
 
 ## Implemented prototype
 
-`renderer/src/main.rs` initializes GStreamer, opens one local path with
-`playbin`, directs video to `gtk4paintablesink`, directs audio to `fakesink`,
-and displays the sink's `GdkPaintable` in `gtk::Picture`. End-of-stream seeks
-to time zero. On application shutdown the pipeline is moved to `NULL`.
+The renderer prefers GStreamer's `playbin` with `gtk4paintablesink` and a
+`GdkPaintable` in `gtk::Picture`, sending audio to `fakesink`. When that
+optional plugin is unavailable, it uses GTK's `GtkVideo`/`GtkMediaStream`
+backend instead. Both paths mute audio, loop video, and preserve playback
+position across pause/resume. This fallback uses the GTK media backend provided
+by the platform (for example `libgtk-4-media-gstreamer` on Ubuntu 24.04).
+Pipeline teardown reaches `NULL` for the direct GStreamer path; the GTK media
+stream is paused and released when stopped.
 
 This is a single-process GTK playback window, not the planned long-lived
 renderer service. It has no D-Bus API, explicit service state machine,

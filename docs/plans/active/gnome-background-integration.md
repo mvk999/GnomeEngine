@@ -17,13 +17,16 @@ extension is limited to compositor integration and lifecycle events.
 - The workspace contains a Rust `renderer` crate and the ES-module Shell
   extension. The renderer now has a session-bus lifecycle service, but still
   displays video in a normal GTK preview window.
-- The renderer uses GTK4, GStreamer `playbin`, `gtk4paintablesink`, a fakesink
-  for audio, EOS seek-to-start looping, and a normal decorated GTK window.
+- The renderer prefers GTK4, GStreamer `playbin`, and `gtk4paintablesink`, with
+  GTK `GtkVideo` fallback when the optional sink plugin is absent; audio is
+  muted and playback loops in a normal GTK window.
 - The extension now reports fullscreen, session lock, monitor topology, and
   built-in-panel power lifecycle state over D-Bus. It does not discover or
   place the renderer window as a desktop background.
 - `./scripts/check.sh` passes after Rust/native development dependencies were
-  installed; the GStreamer GTK paintable plugin itself is still unavailable.
+  installed; the GStreamer GTK paintable plugin is unavailable, so the new GTK
+  media backend fallback is selected in code but still needs runtime playback
+  validation on this host.
 - The available test desktop is Ubuntu 24.04, GNOME Shell 46, X11. It cannot
   validate the GNOME 50+ Wayland behavior required by this milestone.
 
