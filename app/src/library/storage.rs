@@ -90,6 +90,29 @@ impl Library {
         self.invalid_items
     }
 
+    pub fn include_imported(&mut self, wallpaper: Wallpaper) -> Result<(), String> {
+        let id = wallpaper.manifest.id.clone();
+        if !super::model::valid_id(&id) {
+            return Err("imported wallpaper has an invalid ID".to_owned());
+        }
+        let validated = load_item_for_import(&self.root, &self.root.join(&id))?;
+        if validated.content_path != wallpaper.content_path {
+            return Err("imported wallpaper path does not match its library entry".to_owned());
+        }
+        if let Some(existing) = self
+            .wallpapers
+            .iter_mut()
+            .find(|existing| existing.manifest.id == id)
+        {
+            *existing = validated;
+        } else {
+            self.wallpapers.push(validated);
+        }
+        self.wallpapers
+            .sort_by(|left, right| left.manifest.title.cmp(&right.manifest.title));
+        Ok(())
+    }
+
     pub fn remove(&mut self, id: &str) -> Result<(), String> {
         if !super::model::valid_id(id) {
             return Err("invalid wallpaper ID".to_owned());
@@ -187,7 +210,7 @@ pub fn new_wallpaper_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_item, new_wallpaper_id, Library};
+    use super::{load_item, load_item_for_import, new_wallpaper_id, Library};
     use crate::library::model::{ContentManifest, MediaMetadata, WallpaperManifest};
     use std::{fs, path::Path};
 
@@ -275,6 +298,43 @@ mod tests {
         assert!(library.wallpapers().is_empty());
         assert!(source.is_file());
         assert!(!item.exists());
+        fs::remove_dir_all(temp).unwrap();
+    }
+
+    #[test]
+    fn newly_imported_item_is_added_to_the_live_library_without_rescan() {
+        let temp = std::env::temp_dir().join(format!("gnomeengine-live-{}", new_wallpaper_id()));
+        let root = temp.join("library").join("wallpapers");
+        fs::create_dir_all(&root).unwrap();
+        let mut library = Library::load(root.clone()).unwrap();
+        assert!(library.wallpapers().is_empty());
+
+        let id = new_wallpaper_id();
+        let item = root.join(&id);
+        fs::create_dir_all(item.join("content")).unwrap();
+        fs::write(item.join("content/wallpaper"), b"managed video").unwrap();
+        let manifest = WallpaperManifest {
+            schema_version: 1,
+            id: id.clone(),
+            title: "Live import".to_owned(),
+            wallpaper_type: "video".to_owned(),
+            created_at: "2026-10-02T00:00:00Z".to_owned(),
+            content: ContentManifest {
+                entry: "content/wallpaper".to_owned(),
+            },
+            media: MediaMetadata::default(),
+        };
+        fs::write(
+            item.join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        let wallpaper = load_item_for_import(&root, &item).unwrap();
+
+        library.include_imported(wallpaper).unwrap();
+
+        assert_eq!(library.wallpapers().len(), 1);
+        assert_eq!(library.wallpapers()[0].manifest.id, id);
         fs::remove_dir_all(temp).unwrap();
     }
 }

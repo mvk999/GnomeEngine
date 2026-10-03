@@ -21,24 +21,41 @@ GnomeEngine app
 The renderer remains independent when the app closes. Closing or quitting the
 app never sends `Stop`. An explicit Stop action is the only app action that
 stops playback. If there is no renderer owner when Apply is requested, the app
-looks for `gnomeengine-renderer` beside itself or on `PATH` and starts it with
-GIO's argument-vector API (never through a shell). The app waits for session
-D-Bus name ownership and then submits the pending Apply request. A failed
-startup is reported in the UI.
+makes a normal session D-Bus call, allowing the installed service file to
+activate the renderer on demand. In a development checkout without D-Bus
+activation installed, it looks for `gnomeengine-renderer` beside itself or on
+`PATH` and starts it with GIO's argument-vector API (never through a shell).
+The app waits for session D-Bus name ownership and then submits the pending
+Apply request. A failed startup is reported in the UI.
 
 ## Navigation and preview
 
 Library is the home page: an explanatory empty state or responsive static image
-grid, never a video-playing grid. Detail navigation creates one muted `GtkVideo`
-preview. Back, Import navigation, and explicit app teardown stop and release
-that preview. Preview and renderer pipelines are intentionally separate.
+grid, never a video-playing grid. The branded sidebar uses native adaptive
+Libadwaita split navigation and keeps renderer playback context visible. The
+interface follows the system color scheme and system font, with a small
+project-owned accent and the supplied project logo; it does not load remote
+fonts or assets.
+
+Cards and details use only library manifests, cached thumbnails, and file
+metadata. Search filters already-loaded titles. Displays reports actual
+session/renderer information and explains that monitor inventory and real
+background placement are not available instead of fabricating output rows.
+Settings only exposes the renderer-owned battery pause preference; other
+lifecycle policies remain automatic and are not presented as configurable.
+
+Detail navigation creates one muted `GtkVideo` preview. Back, navigation away,
+Import, and explicit app teardown stop and release that preview. Preview and
+renderer pipelines are intentionally separate. Detail actions switch between
+Apply and Stop from the renderer's confirmed status.
 
 The header reflects renderer availability/state and pause reasons. A current
 library item is marked active only after `GetStatus` confirms the renderer's
 canonical content path. Preferences currently expose only the M3 battery pause
 policy; it is stored by the renderer under the user's XDG config directory so
-it remains effective with the GUI closed. About does not claim an undeclared
-license.
+it remains effective with the GUI closed. The About window shows the
+application name, current version, developer label, website, and issue link;
+the project license is declared in Cargo and AppStream metadata.
 
 ## Renderer client and errors
 

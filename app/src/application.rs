@@ -12,6 +12,7 @@ pub fn run() -> glib::ExitCode {
             window.present();
             return;
         }
+        crate::ui::install_style();
         let library = match Library::load_default() {
             Ok(library) => library,
             Err(error) => {
