@@ -2,7 +2,7 @@ use std::{cell::RefCell, path::PathBuf, rc::Rc, thread};
 
 use adw::prelude::*;
 
-use crate::library::{import_video, Library, Wallpaper};
+use crate::library::{import_video, Library, Wallpaper, WallpaperOrigin};
 use crate::renderer_client::{RendererClient, RendererStatus};
 use crate::ui::{self, Sidebar};
 
@@ -69,29 +69,26 @@ impl MainWindow {
         let toolbar = adw::ToolbarView::new();
         let toast_overlay = adw::ToastOverlay::new();
         let header = adw::HeaderBar::new();
-        let title_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let header_title = gtk::Label::new(Some("Biblioteca"));
-        header_title.add_css_class("title");
-        let renderer_status_label = gtk::Label::new(Some("Conectando ao renderer…"));
-        renderer_status_label.add_css_class("dim-label");
-        renderer_status_label.add_css_class("caption");
-        title_box.append(&header_title);
-        title_box.append(&renderer_status_label);
-        header.set_title_widget(Some(&title_box));
-
-        let stop_button = gtk::Button::from_icon_name("media-playback-stop-symbolic");
-        stop_button.set_tooltip_text(Some("Parar wallpaper"));
-        stop_button.update_property(&[gtk::accessible::Property::Label("Parar wallpaper")]);
-        stop_button.set_visible(false);
-        header.pack_end(&stop_button);
-        let manual_pause_button = gtk::Button::from_icon_name("media-playback-pause-symbolic");
-        manual_pause_button.set_tooltip_text(Some("Pausar wallpaper"));
-        manual_pause_button
-            .update_property(&[gtk::accessible::Property::Label("Pausar wallpaper")]);
-        manual_pause_button.set_visible(false);
-        header.pack_end(&manual_pause_button);
+        header.set_show_title(false);
+        header.add_css_class("ge-topbar");
+        let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
+        back_button.set_tooltip_text(Some("Voltar à biblioteca"));
+        back_button.update_property(&[gtk::accessible::Property::Label("Voltar à biblioteca")]);
+        back_button.set_visible(false);
+        header.pack_start(&back_button);
+        let header_title = gtk::Label::new(Some("Biblioteca  /  Seus wallpapers"));
+        header_title.set_xalign(0.0);
+        header_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        header_title.add_css_class("ge-breadcrumb");
+        header_title.set_hexpand(true);
+        header.pack_start(&header_title);
 
         let menu = gio::Menu::new();
+        menu.append(
+            Some("Pausar ou retomar reprodução"),
+            Some("app.toggle-pause"),
+        );
+        menu.append(Some("Parar wallpaper"), Some("app.stop-wallpaper"));
         menu.append(Some("Configurações"), Some("app.preferences"));
         menu.append(Some("Sobre o GnomeEngine"), Some("app.about"));
         let menu_button = gtk::MenuButton::builder()
@@ -101,14 +98,59 @@ impl MainWindow {
             .build();
         menu_button.update_property(&[gtk::accessible::Property::Label("Menu principal")]);
         header.pack_end(&menu_button);
-        let import_button = gtk::Button::from_icon_name("list-add-symbolic");
-        import_button.set_tooltip_text(Some("Importar wallpaper"));
-        import_button.update_property(&[gtk::accessible::Property::Label("Importar wallpaper")]);
-        import_button.set_label("Importar wallpaper");
-        import_button.add_css_class("suggested-action");
-        import_button.set_action_name(Some("app.import"));
-        header.pack_end(&import_button);
         toolbar.add_top_bar(&header);
+
+        let stop_action = gio::SimpleAction::new("stop-wallpaper", None);
+        stop_action.set_enabled(false);
+        stop_action.connect_activate({
+            let renderer = renderer.clone();
+            let toast_overlay = toast_overlay.clone();
+            move |_, _| {
+                renderer.stop({
+                    let toast_overlay = toast_overlay.clone();
+                    move |result| match result {
+                        Ok(()) => toast_overlay.add_toast(adw::Toast::new("Wallpaper parado")),
+                        Err(error) => {
+                            eprintln!("gnomeengine: could not stop wallpaper: {error}");
+                            toast_overlay
+                                .add_toast(adw::Toast::new("Não foi possível parar o wallpaper"));
+                        }
+                    }
+                });
+            }
+        });
+        app.add_action(&stop_action);
+
+        let pause_action = gio::SimpleAction::new("toggle-pause", None);
+        pause_action.set_enabled(false);
+        pause_action.connect_activate({
+            let renderer = renderer.clone();
+            let toast_overlay = toast_overlay.clone();
+            move |_, _| {
+                let manual_paused = renderer
+                    .status()
+                    .pause_reasons
+                    .iter()
+                    .any(|reason| reason == "manual");
+                let toast_overlay = toast_overlay.clone();
+                let renderer_for_result = renderer.clone();
+                let callback = move |result| {
+                    if let Err(error) = result {
+                        eprintln!("gnomeengine: manual playback control failed: {error}");
+                        toast_overlay
+                            .add_toast(adw::Toast::new("Não foi possível alterar a reprodução"));
+                    } else {
+                        renderer_for_result.refresh_status();
+                    }
+                };
+                if manual_paused {
+                    renderer.resume(callback);
+                } else {
+                    renderer.pause(callback);
+                }
+            }
+        });
+        app.add_action(&pause_action);
 
         let library = Rc::new(RefCell::new(library));
         if library.borrow().invalid_items() > 0 {
@@ -126,46 +168,12 @@ impl MainWindow {
             None
         }));
 
-        {
-            let renderer = renderer.clone();
-            let toast_overlay = toast_overlay.clone();
-            stop_button.connect_clicked(move |_| {
-                renderer.stop({
-                    let toast_overlay = toast_overlay.clone();
-                    move |result| match result {
-                        Ok(()) => toast_overlay.add_toast(adw::Toast::new("Wallpaper parado")),
-                        Err(error) => {
-                            eprintln!("gnomeengine: could not stop wallpaper: {error}");
-                            toast_overlay
-                                .add_toast(adw::Toast::new("Não foi possível parar o wallpaper"));
-                        }
-                    }
-                });
-            });
-        }
-
-        {
-            let renderer = renderer.clone();
-            manual_pause_button.connect_clicked(move |button| {
-                let manual_paused = renderer
-                    .status()
-                    .pause_reasons
-                    .iter()
-                    .any(|reason| reason == "manual");
-                button.set_sensitive(false);
-                if manual_paused {
-                    renderer.resume(playback_control_result(button.clone(), renderer.clone()));
-                } else {
-                    renderer.pause(playback_control_result(button.clone(), renderer.clone()));
-                }
-            });
-        }
-
         let detail_view = gtk::Box::new(gtk::Orientation::Horizontal, 24);
+        detail_view.add_css_class("ge-detail-page");
         detail_view.set_margin_top(24);
         detail_view.set_margin_bottom(24);
-        detail_view.set_margin_start(24);
-        detail_view.set_margin_end(24);
+        detail_view.set_margin_start(38);
+        detail_view.set_margin_end(38);
         if let Ok(condition) = adw::BreakpointCondition::parse("max-width: 900px") {
             let breakpoint = adw::Breakpoint::new(condition);
             breakpoint.add_setter(
@@ -177,11 +185,6 @@ impl MainWindow {
         }
         stack.add_named(&detail_view, Some("detail"));
         let detail_controls = Rc::new(RefCell::new(None::<DetailControls>));
-        let back_button = gtk::Button::from_icon_name("go-previous-symbolic");
-        back_button.set_tooltip_text(Some("Voltar à biblioteca"));
-        back_button.update_property(&[gtk::accessible::Property::Label("Voltar à biblioteca")]);
-        back_button.set_visible(false);
-        header.pack_start(&back_button);
         let open_handler_slot = Rc::new(RefCell::new(None::<OpenHandler>));
         let open_handler: OpenHandler = {
             let stack = stack.clone();
@@ -233,7 +236,7 @@ impl MainWindow {
         // before presenting the window (otherwise users see a blank page).
         stack.set_visible_child_name("library");
         let sidebar = ui::sidebar();
-        let displays_view = displays_page(&renderer);
+        let displays_view = displays_page(&renderer, &toast_overlay);
         let settings_view = settings_page(&renderer, &toast_overlay);
         stack.add_named(&displays_view, Some("displays"));
         stack.add_named(&settings_view, Some("settings"));
@@ -244,11 +247,21 @@ impl MainWindow {
         let navigation = adw::NavigationSplitView::new();
         navigation.set_sidebar(Some(&sidebar_page));
         navigation.set_content(Some(&content_page));
-        navigation.set_min_sidebar_width(220.0);
-        navigation.set_max_sidebar_width(260.0);
-        navigation.set_sidebar_width_fraction(0.22);
+        navigation.add_css_class("ge-navigation");
+        navigation.set_min_sidebar_width(228.0);
+        navigation.set_max_sidebar_width(242.0);
+        navigation.set_sidebar_width_fraction(0.21);
+        sidebar_page.add_css_class("ge-sidebar-page");
+        content_page.add_css_class("ge-content-page");
+        toolbar.add_css_class("ge-main-surface");
         toast_overlay.set_child(Some(&navigation));
         window.set_content(Some(&toast_overlay));
+        window.add_css_class("ge-app-window");
+        ui::update_theme_class(&window);
+        adw::StyleManager::default().connect_dark_notify({
+            let window = window.clone();
+            move |_| ui::update_theme_class(&window)
+        });
 
         connect_navigation(
             &sidebar,
@@ -262,9 +275,8 @@ impl MainWindow {
         ui::update_sidebar(&sidebar, &renderer.status(), &library.borrow());
 
         {
-            let renderer_status_label = renderer_status_label.clone();
-            let stop_button = stop_button.clone();
-            let manual_pause_button = manual_pause_button.clone();
+            let stop_action = stop_action.clone();
+            let pause_action = pause_action.clone();
             let stack = stack.clone();
             let library = library.clone();
             let open_handler_slot = open_handler_slot.clone();
@@ -272,12 +284,9 @@ impl MainWindow {
             let sidebar = sidebar.clone();
             let detail_controls = detail_controls.clone();
             renderer.connect_status_changed(move |status| {
-                update_renderer_status(
-                    &renderer_status_label,
-                    &stop_button,
-                    &manual_pause_button,
-                    &status,
-                );
+                let controls_available = status.available && status.wallpaper_active;
+                stop_action.set_enabled(controls_available);
+                pause_action.set_enabled(controls_available);
                 let new_path = if status.wallpaper_active {
                     status.current_video.clone()
                 } else {
@@ -320,7 +329,7 @@ impl MainWindow {
                     &open_handler_slot,
                     active_path.borrow().as_deref(),
                 );
-                header_title.set_label("Biblioteca");
+                header_title.set_label("Biblioteca  /  Seus wallpapers");
                 button_for_callback.set_visible(false);
             });
         }
@@ -343,7 +352,7 @@ impl MainWindow {
                 stop_preview(&active_preview, &detail_view);
                 detail_controls.borrow_mut().take();
                 stack.set_visible_child_name("library");
-                header_title.set_label("Biblioteca");
+                header_title.set_label("Biblioteca  /  Seus wallpapers");
                 back_button.set_visible(false);
                 set_sidebar_selection(&sidebar, "library");
 
@@ -421,9 +430,21 @@ fn connect_navigation(
     detail_controls: &Rc<RefCell<Option<DetailControls>>>,
 ) {
     for (button, page, page_title) in [
-        (&sidebar.library_button, "library", "Biblioteca"),
-        (&sidebar.displays_button, "displays", "Telas"),
-        (&sidebar.settings_button, "settings", "Configurações"),
+        (
+            &sidebar.library_button,
+            "library",
+            "Biblioteca  /  Seus wallpapers",
+        ),
+        (
+            &sidebar.displays_button,
+            "displays",
+            "Telas  /  Monitores conectados",
+        ),
+        (
+            &sidebar.settings_button,
+            "settings",
+            "Configurações  /  Preferências de desempenho",
+        ),
     ] {
         let stack = stack.clone();
         let title = title.clone();
@@ -463,12 +484,13 @@ fn title_matches_query(title: &str, query: &str) -> bool {
     query.is_empty() || title.to_lowercase().contains(&query.to_lowercase())
 }
 
-fn displays_page(renderer: &RendererClient) -> gtk::Widget {
+fn displays_page(renderer: &RendererClient, toast_overlay: &adw::ToastOverlay) -> gtk::Widget {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 18);
-    page.set_margin_top(32);
-    page.set_margin_bottom(32);
-    page.set_margin_start(36);
-    page.set_margin_end(36);
+    page.add_css_class("ge-page");
+    page.set_margin_top(34);
+    page.set_margin_bottom(36);
+    page.set_margin_start(38);
+    page.set_margin_end(38);
     let clamp = adw::Clamp::new();
     clamp.set_maximum_size(1050);
     clamp.set_child(Some(&page));
@@ -481,19 +503,14 @@ fn displays_page(renderer: &RendererClient) -> gtk::Widget {
     );
 
     let group = adw::PreferencesGroup::new();
+    group.add_css_class("ge-panel");
     group.set_title("Integração atual");
     group.set_description(Some(
         "O GnomeEngine usa uma superfície de vídeo controlada pelo Mutter como fundo da sessão GNOME.",
     ));
     let session_row = adw::ActionRow::new();
     session_row.set_title("Sessão gráfica");
-    let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "desconhecida".to_owned());
-    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "GNOME".to_owned());
-    session_row.set_subtitle(&format!(
-        "{} · {}",
-        desktop.split(':').next().unwrap_or("GNOME"),
-        session
-    ));
+    session_row.set_subtitle(&ui::desktop_session_description());
     group.add(&session_row);
     let renderer_row = adw::ActionRow::new();
     renderer_row.set_title("Serviço do renderer");
@@ -523,12 +540,38 @@ fn displays_page(renderer: &RendererClient) -> gtk::Widget {
         });
     integration_icon.set_valign(gtk::Align::Center);
     integration_row.add_suffix(&integration_icon);
+    let enable_integration = gtk::Button::with_label("Ativar integração");
+    enable_integration.set_valign(gtk::Align::Center);
+    enable_integration.set_visible(
+        !renderer.status().desktop_integration_ready
+            && crate::integration::extension_can_be_enabled(),
+    );
+    integration_row.add_suffix(&enable_integration);
     group.add(&integration_row);
+    enable_integration.connect_clicked({
+        let toast_overlay = toast_overlay.clone();
+        let enable_integration = enable_integration.clone();
+        move |_| match crate::integration::enable_for_current_user() {
+            Ok(()) => {
+                enable_integration.set_visible(false);
+                toast_overlay.add_toast(adw::Toast::new(
+                    "Integração ativada. O GNOME está carregando a extensão.",
+                ));
+            }
+            Err(error) => {
+                eprintln!("gnomeengine: could not enable GNOME Shell extension: {error}");
+                toast_overlay.add_toast(adw::Toast::new(
+                    "Não foi possível ativar a integração com o GNOME",
+                ));
+            }
+        }
+    });
     renderer.connect_status_changed({
         let renderer_row = renderer_row.clone();
         let renderer_icon = renderer_icon.clone();
         let integration_row = integration_row.clone();
         let integration_icon = integration_icon.clone();
+        let enable_integration = enable_integration.clone();
         move |status| {
             renderer_row.set_subtitle(if status.available {
                 "Conectado à sessão D-Bus"
@@ -548,6 +591,10 @@ fn displays_page(renderer: &RendererClient) -> gtk::Widget {
             } else {
                 "dialog-warning-symbolic"
             }));
+            enable_integration.set_visible(
+                !status.desktop_integration_ready && crate::integration::extension_can_be_enabled(),
+            );
+            enable_integration.set_sensitive(!status.desktop_integration_ready);
         }
     });
     page.append(&group);
@@ -564,10 +611,11 @@ fn displays_page(renderer: &RendererClient) -> gtk::Widget {
 
 fn settings_page(renderer: &RendererClient, toast_overlay: &adw::ToastOverlay) -> gtk::Widget {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 18);
-    page.set_margin_top(32);
-    page.set_margin_bottom(32);
-    page.set_margin_start(36);
-    page.set_margin_end(36);
+    page.add_css_class("ge-page");
+    page.set_margin_top(34);
+    page.set_margin_bottom(36);
+    page.set_margin_start(38);
+    page.set_margin_end(38);
     let clamp = adw::Clamp::new();
     clamp.set_maximum_size(900);
     clamp.set_child(Some(&page));
@@ -579,24 +627,38 @@ fn settings_page(renderer: &RendererClient, toast_overlay: &adw::ToastOverlay) -
     );
 
     let group = adw::PreferencesGroup::new();
+    group.add_css_class("ge-panel");
     group.set_title("Desempenho e energia");
     group.set_description(Some(
         "Comportamentos que ajudam a manter o desktop responsivo.",
     ));
     let battery = adw::SwitchRow::new();
     battery.set_title("Pausar usando bateria");
-    battery.set_subtitle("Pausa o renderer enquanto o computador usa bateria.");
+    battery.set_subtitle(
+        "Economiza energia pausando o wallpaper quando estiver desconectado da tomada.",
+    );
     battery.set_active(renderer.status().pause_on_battery);
-    battery.set_sensitive(renderer.status().available);
+    let low_battery_only = adw::SwitchRow::new();
+    low_battery_only.set_title("Somente com 20% de bateria ou menos");
+    low_battery_only.set_subtitle(
+        "Com a pausa por bateria ativa, pausa somente em 20% ou menos; acima disso, continua reproduzindo.",
+    );
+    low_battery_only.set_active(renderer.status().pause_on_low_battery_only);
     let reverting = Rc::new(std::cell::Cell::new(false));
     renderer.connect_status_changed({
         let battery = battery.clone();
+        let low_battery_only = low_battery_only.clone();
         let reverting = reverting.clone();
         move |status| {
-            battery.set_sensitive(status.available);
+            battery.set_sensitive(true);
             if battery.is_active() != status.pause_on_battery {
                 reverting.set(true);
                 battery.set_active(status.pause_on_battery);
+                reverting.set(false);
+            }
+            if low_battery_only.is_active() != status.pause_on_low_battery_only {
+                reverting.set(true);
+                low_battery_only.set_active(status.pause_on_low_battery_only);
                 reverting.set(false);
             }
         }
@@ -633,10 +695,45 @@ fn settings_page(renderer: &RendererClient, toast_overlay: &adw::ToastOverlay) -
             });
         }
     });
+    low_battery_only.connect_active_notify({
+        let renderer = renderer.clone();
+        let toast_overlay = toast_overlay.clone();
+        let reverting = reverting.clone();
+        move |row| {
+            if reverting.get() {
+                return;
+            }
+            let enabled = row.is_active();
+            row.set_sensitive(false);
+            renderer.set_pause_on_low_battery_only(enabled, {
+                let row = row.clone();
+                let toast_overlay = toast_overlay.clone();
+                let renderer = renderer.clone();
+                let reverting = reverting.clone();
+                move |result| match result {
+                    Ok(()) => {
+                        row.set_sensitive(true);
+                        toast_overlay.add_toast(adw::Toast::new("Preferência atualizada"));
+                    }
+                    Err(error) => {
+                        eprintln!("gnomeengine: could not save low-battery preference: {error}");
+                        reverting.set(true);
+                        row.set_active(renderer.status().pause_on_low_battery_only);
+                        reverting.set(false);
+                        row.set_sensitive(true);
+                        toast_overlay
+                            .add_toast(adw::Toast::new("Não foi possível salvar esta preferência"));
+                    }
+                }
+            });
+        }
+    });
     group.add(&battery);
+    group.add(&low_battery_only);
     page.append(&group);
 
     let diagnostics = adw::PreferencesGroup::new();
+    diagnostics.add_css_class("ge-panel");
     diagnostics.set_title("Diagnóstico");
     diagnostics.set_description(Some(
         "Estado atual da comunicação com o serviço de renderização.",
@@ -672,11 +769,11 @@ fn append_page_heading(parent: &gtk::Box, eyebrow: &str, title: &str, subtitle: 
     let heading = gtk::Box::new(gtk::Orientation::Vertical, 7);
     let eyebrow_label = gtk::Label::new(Some(eyebrow));
     eyebrow_label.set_xalign(0.0);
-    eyebrow_label.add_css_class("accent");
+    eyebrow_label.add_css_class("ge-eyebrow");
     eyebrow_label.add_css_class("caption");
     let title_label = gtk::Label::new(Some(title));
     title_label.set_xalign(0.0);
-    title_label.add_css_class("title-1");
+    title_label.add_css_class("ge-page-title");
     let subtitle_label = gtk::Label::new(Some(subtitle));
     subtitle_label.set_xalign(0.0);
     subtitle_label.add_css_class("dim-label");
@@ -748,64 +845,6 @@ fn install_about_action(app: &adw::Application, parent: &adw::ApplicationWindow)
     app.add_action(&action);
 }
 
-fn update_renderer_status(
-    label: &gtk::Label,
-    stop_button: &gtk::Button,
-    manual_pause_button: &gtk::Button,
-    status: &RendererStatus,
-) {
-    if !status.available {
-        label.set_label("Serviço do renderer indisponível");
-        stop_button.set_visible(false);
-        manual_pause_button.set_visible(false);
-        return;
-    }
-    stop_button.set_visible(status.wallpaper_active);
-    manual_pause_button.set_visible(status.wallpaper_active);
-    let manual_paused = status.pause_reasons.iter().any(|reason| reason == "manual");
-    manual_pause_button.set_icon_name(if manual_paused {
-        "media-playback-start-symbolic"
-    } else {
-        "media-playback-pause-symbolic"
-    });
-    manual_pause_button.set_tooltip_text(Some(if manual_paused {
-        "Retomar reprodução"
-    } else {
-        "Pausar reprodução"
-    }));
-    manual_pause_button.update_property(&[gtk::accessible::Property::Label(if manual_paused {
-        "Retomar reprodução"
-    } else {
-        "Pausar reprodução"
-    })]);
-    let text = match status.state.as_str() {
-        "playing" => "Em reprodução".to_owned(),
-        "paused" if status.pause_reasons.is_empty() => "Pausado".to_owned(),
-        "paused" => format!(
-            "Pausado · {}",
-            ui::localized_reason(&status.pause_reasons[0])
-        ),
-        "loading" | "loading-status" => "Carregando wallpaper…".to_owned(),
-        "error" => "Erro na reprodução".to_owned(),
-        "stopped" => "Renderer parado".to_owned(),
-        _ => "Renderer conectado".to_owned(),
-    };
-    label.set_label(&text);
-    label.set_tooltip_text(status.last_error.as_deref());
-}
-
-fn playback_control_result(
-    button: gtk::Button,
-    renderer: RendererClient,
-) -> impl Fn(Result<(), String>) + 'static {
-    move |result| {
-        button.set_sensitive(renderer.status().available);
-        if let Err(error) = result {
-            eprintln!("gnomeengine: manual playback control failed: {error}");
-        }
-    }
-}
-
 fn stop_preview(active_preview: &Rc<RefCell<Option<gtk::Video>>>, detail: &gtk::Box) {
     if let Some(preview) = active_preview.borrow_mut().take() {
         preview.set_autoplay(false);
@@ -827,6 +866,7 @@ fn library_view(
     active_path: Option<&str>,
 ) -> gtk::Widget {
     let page = gtk::Box::new(gtk::Orientation::Vertical, 20);
+    page.add_css_class("ge-page");
     page.set_margin_top(34);
     page.set_margin_bottom(28);
     page.set_margin_start(38);
@@ -836,15 +876,17 @@ fn library_view(
     clamp.set_child(Some(&page));
 
     let heading = gtk::Box::new(gtk::Orientation::Horizontal, 20);
+    heading.add_css_class("ge-library-heading");
     heading.set_valign(gtk::Align::End);
     let heading_text = gtk::Box::new(gtk::Orientation::Vertical, 7);
+    heading_text.set_hexpand(true);
     let eyebrow = gtk::Label::new(Some("SEU DESKTOP, DO SEU JEITO"));
     eyebrow.set_xalign(0.0);
-    eyebrow.add_css_class("accent");
+    eyebrow.add_css_class("ge-eyebrow");
     eyebrow.add_css_class("caption");
     let title = gtk::Label::new(Some("Biblioteca"));
     title.set_xalign(0.0);
-    title.add_css_class("title-1");
+    title.add_css_class("ge-page-title");
     let subtitle = gtk::Label::new(Some(if library.wallpapers().is_empty() {
         "Seus wallpapers ficam organizados em um só lugar."
     } else {
@@ -859,7 +901,7 @@ fn library_view(
     heading.append(&heading_text);
     let import_button = gtk::Button::with_label("Importar wallpaper");
     import_button.set_icon_name("list-add-symbolic");
-    import_button.add_css_class("suggested-action");
+    import_button.add_css_class("ge-primary");
     import_button.set_action_name(Some("app.import"));
     import_button.set_tooltip_text(Some("Importar um vídeo para sua biblioteca"));
     import_button.update_property(&[gtk::accessible::Property::Label("Importar wallpaper")]);
@@ -872,7 +914,41 @@ fn library_view(
     if library.wallpapers().is_empty() {
         page.append(&empty_state());
     } else {
-        page.append(&wallpaper_grid(library.wallpapers(), on_open, active_path));
+        let query = Rc::new(RefCell::new(String::new()));
+        let filters = Rc::new(RefCell::new(Vec::new()));
+        page.append(&library_toolbar(
+            library.wallpapers().len(),
+            query.clone(),
+            filters.clone(),
+        ));
+        for (origin, heading) in [
+            (WallpaperOrigin::BuiltIn, "Incluídos com GnomeEngine"),
+            (WallpaperOrigin::User, "Seus wallpapers"),
+        ] {
+            let wallpapers = library
+                .wallpapers()
+                .iter()
+                .filter(|wallpaper| wallpaper.origin == origin)
+                .cloned()
+                .collect::<Vec<_>>();
+            if wallpapers.is_empty() {
+                continue;
+            }
+            let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
+            let label = gtk::Label::new(Some(heading));
+            label.set_xalign(0.0);
+            label.add_css_class("heading");
+            label.add_css_class("ge-library-section-title");
+            section.append(&label);
+            section.append(&wallpaper_grid(
+                &wallpapers,
+                on_open.clone(),
+                active_path,
+                query.clone(),
+                filters.clone(),
+            ));
+            page.append(&section);
+        }
     }
     clamp.upcast()
 }
@@ -900,8 +976,9 @@ fn empty_state() -> gtk::Widget {
         .title("Deixe seu desktop mais vivo")
         .description("Importe um vídeo para começar. Você poderá visualizar e aplicar seu wallpaper em poucos passos.")
         .build();
+    status.add_css_class("ge-empty-state");
     let import_button = gtk::Button::with_label("Importar wallpaper");
-    import_button.add_css_class("suggested-action");
+    import_button.add_css_class("ge-primary");
     import_button.set_action_name(Some("app.import"));
     import_button.update_property(&[gtk::accessible::Property::Label("Importar wallpaper")]);
     status.set_child(Some(&import_button));
@@ -912,12 +989,13 @@ fn wallpaper_grid(
     wallpapers: &[Wallpaper],
     on_open: OpenHandler,
     active_path: Option<&str>,
+    query: Rc<RefCell<String>>,
+    filters: Rc<RefCell<Vec<gtk::CustomFilter>>>,
 ) -> gtk::Widget {
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
     for wallpaper in wallpapers {
         store.append(&glib::BoxedAnyObject::new(wallpaper.clone()));
     }
-    let query = Rc::new(RefCell::new(String::new()));
     let filter = gtk::CustomFilter::new({
         let query = query.clone();
         move |object| {
@@ -928,6 +1006,7 @@ fn wallpaper_grid(
             title_matches_query(&wallpaper.manifest.title, &query.borrow())
         }
     });
+    filters.borrow_mut().push(filter.clone());
     let filtered = gtk::FilterListModel::new(Some(store), Some(filter.clone()));
     let selection = gtk::NoSelection::new(Some(filtered.clone()));
     let factory = gtk::SignalListItemFactory::new();
@@ -1004,8 +1083,9 @@ fn wallpaper_grid(
         }
     });
     let grid = gtk::GridView::new(Some(selection), Some(factory));
+    grid.add_css_class("ge-wallpaper-grid");
     grid.set_min_columns(1);
-    grid.set_max_columns(4);
+    grid.set_max_columns(3);
     grid.set_single_click_activate(true);
     grid.connect_activate(move |grid, position| {
         let Some(wallpaper) = grid
@@ -1019,13 +1099,29 @@ fn wallpaper_grid(
         on_open(wallpaper);
     });
 
+    let scrolled = gtk::ScrolledWindow::builder()
+        .child(&grid)
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .vexpand(true)
+        .build();
+    scrolled.upcast()
+}
+
+fn library_toolbar(
+    count: usize,
+    query: Rc<RefCell<String>>,
+    filters: Rc<RefCell<Vec<gtk::CustomFilter>>>,
+) -> gtk::Widget {
     let toolbar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    let count = gtk::Label::new(Some(&format!("Todos ({})", wallpapers.len())));
+    toolbar.add_css_class("ge-library-toolbar");
+    let count = gtk::Label::new(Some(&format!("Todos ({count})")));
     count.set_xalign(0.0);
     count.add_css_class("dim-label");
+    count.add_css_class("ge-filter-active");
     let video_filter = gtk::Label::new(Some("Vídeos"));
     video_filter.add_css_class("caption");
     video_filter.add_css_class("dim-label");
+    video_filter.add_css_class("ge-filter");
     toolbar.append(&count);
     toolbar.append(&video_filter);
     let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -1036,27 +1132,22 @@ fn wallpaper_grid(
     search.set_tooltip_text(Some("Buscar pelo título do wallpaper"));
     search.update_property(&[gtk::accessible::Property::Label("Buscar na biblioteca")]);
     search.connect_search_changed({
-        let filter = filter.clone();
+        let filters = filters.clone();
         move |search| {
             *query.borrow_mut() = search.text().trim().to_lowercase();
-            filter.changed(gtk::FilterChange::Different);
+            for filter in filters.borrow().iter() {
+                filter.changed(gtk::FilterChange::Different);
+            }
         }
     });
     toolbar.append(&search);
 
-    let section = gtk::Box::new(gtk::Orientation::Vertical, 14);
-    section.append(&toolbar);
-    let scrolled = gtk::ScrolledWindow::builder()
-        .child(&grid)
-        .hscrollbar_policy(gtk::PolicyType::Never)
-        .vexpand(true)
-        .build();
-    section.append(&scrolled);
-    section.upcast()
+    toolbar.upcast()
 }
 
 fn populate_wallpaper_card(card: &gtk::Box, wallpaper: &Wallpaper, active_path: Option<&str>) {
     let media_slot = gtk::Overlay::new();
+    media_slot.add_css_class("ge-thumbnail");
     media_slot.set_size_request(-1, 170);
     if wallpaper.thumbnail_path.is_file() {
         let picture = gtk::Picture::for_filename(&wallpaper.thumbnail_path);
@@ -1104,6 +1195,7 @@ fn populate_wallpaper_card(card: &gtk::Box, wallpaper: &Wallpaper, active_path: 
     card.append(&media_slot);
 
     let info = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    info.add_css_class("ge-card-info");
     info.set_margin_top(12);
     info.set_margin_bottom(13);
     info.set_margin_start(14);
@@ -1111,6 +1203,7 @@ fn populate_wallpaper_card(card: &gtk::Box, wallpaper: &Wallpaper, active_path: 
     let title = gtk::Label::new(Some(&wallpaper.manifest.title));
     title.set_xalign(0.0);
     title.add_css_class("heading");
+    title.add_css_class("ge-card-title");
     title.set_ellipsize(gtk::pango::EllipsizeMode::End);
     if active_path == Some(wallpaper.content_path.to_string_lossy().as_ref()) {
         title.set_label(&format!("{}  ·  Ativo", wallpaper.manifest.title));
@@ -1207,6 +1300,7 @@ fn show_detail(context: DetailContext, wallpaper: &Wallpaper) {
     preview_column.set_vexpand(true);
     let preview_frame = gtk::Frame::new(None);
     preview_frame.add_css_class("card");
+    preview_frame.add_css_class("ge-preview-frame");
     preview_frame.set_child(Some(&video));
     preview_column.append(&preview_frame);
     let preview_caption = gtk::Label::new(Some("PRÉ-VISUALIZAÇÃO · SEM ÁUDIO"));
@@ -1221,16 +1315,17 @@ fn show_detail(context: DetailContext, wallpaper: &Wallpaper) {
     info.set_hexpand(false);
     let type_label = gtk::Label::new(Some("WALLPAPER · VÍDEO"));
     type_label.set_xalign(0.0);
-    type_label.add_css_class("accent");
+    type_label.add_css_class("ge-eyebrow");
     type_label.add_css_class("caption");
     info.append(&type_label);
     let title_label = gtk::Label::new(Some(&wallpaper.manifest.title));
-    title_label.add_css_class("title-1");
+    title_label.add_css_class("ge-detail-title");
     title_label.set_xalign(0.0);
     title_label.set_wrap(true);
     info.append(&title_label);
 
     let specs = adw::PreferencesGroup::new();
+    specs.add_css_class("ge-detail-specs");
     let resolution = match (
         wallpaper.manifest.media.width,
         wallpaper.manifest.media.height,
@@ -1273,7 +1368,7 @@ fn show_detail(context: DetailContext, wallpaper: &Wallpaper) {
     state_label.set_xalign(0.0);
     state_label.add_css_class("success");
     let apply = gtk::Button::with_label("Aplicar wallpaper");
-    apply.add_css_class("suggested-action");
+    apply.add_css_class("ge-primary");
     apply.set_hexpand(true);
     apply.set_visible(!active);
     // Apply remains available while stopped; the client activates the service
@@ -1303,6 +1398,7 @@ fn show_detail(context: DetailContext, wallpaper: &Wallpaper) {
     let remove = gtk::Button::with_label("Remover da biblioteca…");
     remove.add_css_class("flat");
     remove.set_halign(gtk::Align::Start);
+    remove.set_visible(wallpaper.origin == WallpaperOrigin::User);
     info.append(&remove);
     detail.append(&info);
 
@@ -1463,7 +1559,7 @@ fn show_detail(context: DetailContext, wallpaper: &Wallpaper) {
         }
     });
 
-    header_title.set_label("Detalhes do wallpaper");
+    header_title.set_label("Biblioteca  /  Detalhes do wallpaper");
     back_button.set_visible(true);
     stack.set_visible_child_name("detail");
     *active_preview.borrow_mut() = Some(video);
@@ -1505,11 +1601,11 @@ fn remove_wallpaper(id: String, deleted_path: String, context: RemovalContext) {
         open_handler_slot,
         active_path,
     } = context;
-    let root = library.borrow().root().to_path_buf();
+    let library_snapshot = library.borrow().clone();
     toast_overlay.add_toast(adw::Toast::new("Removendo wallpaper…"));
     let (sender, receiver) = futures_channel::oneshot::channel();
     thread::spawn(move || {
-        let result = Library::load(root).and_then(|mut library| {
+        let result = library_snapshot.reload().and_then(|mut library| {
             library.remove(&id)?;
             Ok(library)
         });
@@ -1529,7 +1625,7 @@ fn remove_wallpaper(id: String, deleted_path: String, context: RemovalContext) {
                     active_path.borrow().as_deref(),
                 );
                 stack.set_visible_child_name("library");
-                header_title.set_label("Biblioteca");
+                header_title.set_label("Biblioteca  /  Seus wallpapers");
                 back_button.set_visible(false);
                 toast_overlay.add_toast(adw::Toast::new("Wallpaper removido"));
             }
@@ -1590,8 +1686,8 @@ fn start_import(source: PathBuf, library_root: PathBuf, context: ImportContext) 
                     eprintln!(
                         "gnomeengine: imported item could not be inserted directly; reloading library: {insert_error}"
                     );
-                    let root = library.borrow().root().to_path_buf();
-                    Library::load(root).map(|updated| *library.borrow_mut() = updated)
+                    let snapshot = library.borrow().clone();
+                    snapshot.reload().map(|updated| *library.borrow_mut() = updated)
                 });
                 match result {
                     Ok(()) => {

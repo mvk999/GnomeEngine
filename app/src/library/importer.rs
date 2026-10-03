@@ -114,9 +114,13 @@ pub fn import_video(source: &Path, library_root: &Path) -> Result<Wallpaper, Str
         title: title_from_filename(&source),
         wallpaper_type: "video".to_owned(),
         created_at,
+        author: None,
+        copyright: None,
+        license: None,
         content: ContentManifest {
             entry: "content/wallpaper".to_owned(),
         },
+        thumbnail: None,
         media,
     };
     manifest.validate()?;

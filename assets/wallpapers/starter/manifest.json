@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "gnomeengine-starter-001",
+  "title": "Starter Wallpaper",
+  "type": "video",
+  "createdAt": "2026-10-03T00:00:00Z",
+  "author": "GnomeEngine",
+  "content": {
+    "entry": "wallpaper.mp4"
+  },
+  "thumbnail": "thumbnail.webp",
+  "media": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  }
+}

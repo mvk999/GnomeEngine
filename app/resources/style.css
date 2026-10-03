@@ -1,17 +1,216 @@
-button.nav-selected {
-  background-color: alpha(@accent_color, 0.18);
-  color: @accent_color;
+/* GnomeEngine identity tokens. Keep application-specific styling here, while
+ * letting the widget hierarchy and interaction remain native Adwaita. */
+@define-color ge-accent #c9a8ff;
+@define-color ge-accent-hover #d6bbff;
+@define-color ge-accent-text #21172d;
+@define-color ge-border #ffffff;
+@define-color ge-success #8bd4a1;
+
+window.ge-app-window.ge-dark {
+  background-color: #171719;
+  color: #f4f2f7;
 }
 
-button.wallpaper-card {
-  border: 1px solid alpha(@window_fg_color, 0.10);
-  border-radius: 14px;
+window.ge-app-window.ge-light {
+  background-color: #f6f5f7;
+  color: #242329;
 }
 
-button.wallpaper-card:hover {
-  border-color: alpha(@accent_color, 0.42);
+window.ge-dark .ge-sidebar-page,
+window.ge-dark .ge-sidebar {
+  background-color: #1c1c1f;
 }
 
-.wallpaper-active-dot {
-  color: @success_color;
+window.ge-light .ge-sidebar-page,
+window.ge-light .ge-sidebar {
+  background-color: #efedf1;
+}
+
+window.ge-dark toolbarview.ge-main-surface,
+window.ge-dark .ge-content-page,
+window.ge-dark headerbar.ge-topbar {
+  background-color: #171719;
+}
+
+window.ge-light toolbarview.ge-main-surface,
+window.ge-light .ge-content-page,
+window.ge-light headerbar.ge-topbar {
+  background-color: #f6f5f7;
+}
+
+headerbar.ge-topbar {
+  min-height: 64px;
+  border-bottom: 1px solid alpha(@ge-border, 0.07);
+  box-shadow: none;
+}
+
+.ge-breadcrumb {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+window.ge-dark .ge-breadcrumb { color: #a5a3aa; }
+window.ge-light .ge-breadcrumb { color: #696770; }
+window.ge-light headerbar.ge-topbar {
+  border-bottom-color: alpha(#242329, 0.09);
+}
+
+.ge-sidebar {
+  border-right: 1px solid alpha(@ge-border, 0.07);
+}
+
+window.ge-light .ge-sidebar {
+  border-right-color: alpha(#242329, 0.09);
+}
+
+.ge-sidebar label.heading {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ge-sidebar label.caption { font-size: 11px; }
+
+.ge-sidebar label.dim-label,
+.ge-page label.dim-label { opacity: 0.78; }
+
+.ge-sidebar button.nav-selected {
+  background-color: alpha(#8d69bd, 0.17);
+}
+
+window.ge-dark .ge-sidebar button.nav-selected { color: #e1ccff; }
+window.ge-light .ge-sidebar button.nav-selected { color: #69448f; }
+
+.ge-sidebar button.nav-selected:hover {
+  background-color: alpha(#8d69bd, 0.23);
+}
+
+.ge-active-card {
+  padding: 13px;
+  border: 1px solid alpha(@ge-border, 0.08);
+  border-radius: 12px;
+}
+
+window.ge-dark .ge-active-card { background-color: alpha(#ffffff, 0.025); }
+window.ge-light .ge-active-card {
+  background-color: alpha(#ffffff, 0.62);
+  border-color: alpha(#242329, 0.10);
+}
+
+.ge-active-card label.heading { font-size: 12px; }
+.ge-active-card label.caption { font-size: 11px; }
+.wallpaper-active-dot { color: @ge-success; }
+.wallpaper-paused-dot { color: @ge-accent; }
+
+.ge-session-row {
+  min-height: 48px;
+  padding-top: 12px;
+  border-top: 1px solid alpha(@ge-border, 0.09);
+}
+
+window.ge-light .ge-session-row {
+  border-top-color: alpha(#242329, 0.09);
+}
+
+.ge-session-row image { opacity: 0.82; }
+.ge-session-row label { font-size: 12px; }
+.ge-session-row label.caption { font-size: 10px; }
+
+.ge-page { color: inherit; }
+.ge-page label.ge-eyebrow,
+.ge-detail-page label.ge-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.35px;
+}
+
+window.ge-dark label.ge-eyebrow { color: @ge-accent; }
+window.ge-light label.ge-eyebrow { color: #754bb0; }
+
+label.ge-page-title {
+  font-size: 27px;
+  font-weight: 650;
+}
+
+button.ge-primary {
+  color: @ge-accent-text;
+  background-color: @ge-accent;
+  border: 1px solid alpha(#21172d, 0.10);
+  border-radius: 9px;
+  font-weight: 650;
+}
+
+button.ge-primary:hover {
+  color: @ge-accent-text;
+  background-color: @ge-accent-hover;
+}
+
+button.ge-primary:disabled { opacity: 0.55; }
+
+.ge-library-heading { margin-bottom: 2px; }
+.ge-library-toolbar { min-height: 38px; }
+
+.ge-filter-active {
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+window.ge-dark .ge-filter-active { color: #f4f2f7; background-color: alpha(#ffffff, 0.08); }
+window.ge-light .ge-filter-active { color: #242329; background-color: alpha(#242329, 0.07); }
+.ge-filter { padding: 6px 10px; }
+
+.wallpaper-card {
+  border: 1px solid alpha(@ge-border, 0.08);
+  border-radius: 13px;
+}
+
+window.ge-dark .wallpaper-card { background-color: #202023; }
+window.ge-light .wallpaper-card {
+  background-color: #ffffff;
+  border-color: alpha(#242329, 0.10);
+}
+
+.wallpaper-card:hover {
+  border-color: alpha(#a87be8, 0.58);
+}
+
+.ge-thumbnail {
+  min-height: 170px;
+  background-color: #29292d;
+}
+
+.ge-thumbnail picture {
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+
+.ge-card-info { min-height: 68px; }
+.ge-card-title { font-size: 12px; font-weight: 600; }
+.ge-card-info label.caption { font-size: 10px; }
+
+.ge-empty-state { min-height: 390px; }
+
+.ge-detail-page { min-width: 0; }
+.ge-preview-frame {
+  min-height: 360px;
+  border: 1px solid alpha(@ge-border, 0.08);
+  border-radius: 15px;
+  background-color: #111113;
+}
+
+.ge-detail-title { font-size: 23px; font-weight: 650; }
+.ge-detail-specs { margin-top: 4px; }
+.ge-detail-page label.success { color: @ge-success; }
+.ge-detail-page label.caption { font-size: 10px; }
+.ge-detail-page button.destructive-action { border-radius: 9px; }
+
+preferencesgroup.ge-panel {
+  padding: 10px 12px;
+  border: 1px solid alpha(@ge-border, 0.07);
+  border-radius: 13px;
+}
+
+window.ge-dark preferencesgroup.ge-panel { background-color: #202023; }
+window.ge-light preferencesgroup.ge-panel {
+  background-color: #ffffff;
+  border-color: alpha(#242329, 0.09);
 }

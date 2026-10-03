@@ -23,7 +23,15 @@ pub struct WallpaperManifest {
     #[serde(rename = "type")]
     pub wallpaper_type: String,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copyright: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
     pub content: ContentManifest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail: Option<String>,
     pub media: MediaMetadata,
 }
 
@@ -37,6 +45,19 @@ pub struct Wallpaper {
     pub manifest: WallpaperManifest,
     pub content_path: PathBuf,
     pub thumbnail_path: PathBuf,
+    pub origin: WallpaperOrigin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WallpaperOrigin {
+    BuiltIn,
+    User,
+}
+
+impl WallpaperOrigin {
+    pub fn is_read_only(self) -> bool {
+        self == Self::BuiltIn
+    }
 }
 
 impl WallpaperManifest {
@@ -56,7 +77,11 @@ impl WallpaperManifest {
         if self.title.trim().is_empty() || self.title.len() > 256 {
             return Err("wallpaper title must contain 1 to 256 bytes".to_owned());
         }
-        validate_relative_entry(Path::new(&self.content.entry))
+        validate_relative_entry(Path::new(&self.content.entry))?;
+        if let Some(thumbnail) = &self.thumbnail {
+            validate_relative_entry(Path::new(thumbnail))?;
+        }
+        Ok(())
     }
 }
 
@@ -105,9 +130,13 @@ mod tests {
             title: "Aurora".to_owned(),
             wallpaper_type: "video".to_owned(),
             created_at: "2026-10-02T00:00:00Z".to_owned(),
+            author: None,
+            copyright: None,
+            license: None,
             content: ContentManifest {
                 entry: "content/wallpaper.mp4".to_owned(),
             },
+            thumbnail: None,
             media: MediaMetadata::default(),
         }
     }
@@ -134,6 +163,26 @@ mod tests {
         assert!(validate_relative_entry(Path::new("../escape.mp4")).is_err());
         assert!(validate_relative_entry(Path::new("/tmp/video.mp4")).is_err());
         assert!(validate_relative_entry(Path::new("content/video.mp4")).is_ok());
+        let mut manifest = valid_manifest();
+        manifest.thumbnail = Some("../outside.webp".to_owned());
+        assert!(manifest.validate().unwrap_err().contains("escapes"));
+    }
+
+    #[test]
+    fn legacy_schema_one_manifest_without_optional_metadata_remains_valid() {
+        let json = r#"{
+            "schemaVersion":1,
+            "id":"c92c676a-1f60-4c21-9a84-f97e6b6e6fe0",
+            "title":"Existing import",
+            "type":"video",
+            "createdAt":"2026-10-02T00:00:00Z",
+            "content":{"entry":"content/wallpaper.mp4"},
+            "media":{}
+        }"#;
+        let manifest: WallpaperManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.validate().is_ok());
+        assert_eq!(manifest.thumbnail, None);
+        assert_eq!(manifest.author, None);
     }
 
     #[test]

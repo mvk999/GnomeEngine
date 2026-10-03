@@ -41,8 +41,11 @@ Cards and details use only library manifests, cached thumbnails, and file
 metadata. Search filters already-loaded titles. Displays reports actual
 session/renderer information and explains that monitor inventory and real
 background placement are not available instead of fabricating output rows.
-Settings only exposes the renderer-owned battery pause preference; other
-lifecycle policies remain automatic and are not presented as configurable.
+Settings exposes the battery pause master switch and an optional low-battery
+threshold (20% or less). These controls remain available with no renderer
+process: the app persists the shared lifecycle config locally without starting
+the service. When the service is running, D-Bus updates its policy immediately.
+Fullscreen, lock, display-off, and suspend remain automatic policies.
 
 Detail navigation creates one muted `GtkVideo` preview. Back, navigation away,
 Import, and explicit app teardown stop and release that preview. Preview and
@@ -51,9 +54,8 @@ Apply and Stop from the renderer's confirmed status.
 
 The header reflects renderer availability/state and pause reasons. A current
 library item is marked active only after `GetStatus` confirms the renderer's
-canonical content path. Preferences currently expose only the M3 battery pause
-policy; it is stored by the renderer under the user's XDG config directory so
-it remains effective with the GUI closed. The About window shows the
+canonical content path. Battery preferences are stored under the user's XDG
+config directory and remain effective with the GUI closed. The About window shows the
 application name, current version, developer label, website, and issue link;
 the project license is declared in Cargo and AppStream metadata.
 

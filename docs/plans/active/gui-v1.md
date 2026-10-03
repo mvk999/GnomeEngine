@@ -166,9 +166,10 @@ that the renderer is a real GNOME desktop background.
 
 ## Discoveries and decisions
 
-- Existing settings are renderer-owned and include only `pause-on-battery`;
-  fullscreen/lock are automatic policies with no preference API. UI will not
-  claim they can be configured.
+- Battery preferences are renderer-owned while active and include
+  `pause-on-battery` plus optional `pause-on-low-battery-only`; the app keeps
+  them available and persistent while the renderer is stopped. Fullscreen and
+  lock remain automatic policies with no preference API.
 - Existing renderer status has no monitor inventory/geometry. Displays content
   must be limited to verified environment/state until a justified contract is
   available; adding a new backend contract is outside the UI-first scope.

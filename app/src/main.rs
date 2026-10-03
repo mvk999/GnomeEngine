@@ -1,6 +1,7 @@
 mod application;
 mod integration;
 mod library;
+mod preferences;
 mod renderer_client;
 mod ui;
 mod window;

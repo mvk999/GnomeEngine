@@ -14,7 +14,7 @@ unimplemented.
   GTK4/GStreamer service and still displays a normal GTK preview window.
 - The renderer owns `io.github.mvk999.GnomeEngine.Renderer` on the session bus
   and exports `ApplyVideo`, `Pause`, `Resume`, `Stop`, `GetStatus`, and
-  `SetPauseReason`, `SetPauseOnBattery`; state and lifecycle signals are
+  `SetPauseReason`, `SetPauseOnBattery`, and `SetPauseOnLowBatteryOnly`; state and lifecycle signals are
   event-driven.
 - The Shell extension reports fullscreen, lock, and built-in panel power state.
 - M1 desktop-surface integration is not implemented or runtime-validated.
@@ -74,7 +74,7 @@ away. No transcoding, network access, or per-card playback is added.
 ## Renderer D-Bus client
 
 The client watches well-known-name ownership, asynchronously calls `GetStatus`,
-`ApplyVideo`, `Stop`, and `SetPauseOnBattery`, and subscribes to
+`ApplyVideo`, `Stop`, `SetPauseOnBattery`, and `SetPauseOnLowBatteryOnly`, and subscribes to
 `StateChanged`, `PlaybackError`, `PauseReasonsChanged`, and `PolicyChanged`. It
 reconstructs UI state from a fresh status on service appearance/restart. It
 never polls. Apply uses the managed copy and cards are marked active only when

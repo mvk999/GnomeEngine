@@ -5,6 +5,9 @@ use gio::prelude::*;
 const BUS_NAME: &str = "io.github.mvk999.GnomeEngine.Renderer";
 const OBJECT_PATH: &str = "/io/github/mvk999/GnomeEngine/Renderer";
 const INTERFACE: &str = "io.github.mvk999.GnomeEngine.Renderer";
+const SHELL_INTEGRATION_NAME: &str = "io.github.mvk999.GnomeEngine.ShellIntegration";
+const SHELL_INTEGRATION_PATH: &str = "/io/github/mvk999/GnomeEngine/ShellIntegration";
+const SHELL_INTEGRATION_INTERFACE: &str = "io.github.mvk999.GnomeEngine.ShellIntegration";
 type ApplyCompletion = Box<dyn FnOnce(Result<(), String>)>;
 const INTEGRATION_TIMEOUT_SECONDS: u32 = 8;
 
@@ -22,6 +25,7 @@ pub struct RendererStatus {
     pub last_error: Option<String>,
     pub pause_reasons: Vec<String>,
     pub pause_on_battery: bool,
+    pub pause_on_low_battery_only: bool,
     pub wallpaper_active: bool,
     pub desktop_integration_supported: bool,
     pub desktop_integration_ready: bool,
@@ -36,6 +40,7 @@ impl Default for RendererStatus {
             last_error: None,
             pause_reasons: Vec::new(),
             pause_on_battery: true,
+            pause_on_low_battery_only: false,
             wallpaper_active: false,
             desktop_integration_supported: false,
             desktop_integration_ready: false,
@@ -58,7 +63,11 @@ pub struct RendererClient(Rc<RefCell<ClientInner>>);
 
 impl RendererClient {
     pub fn new() -> Self {
-        let client = Self::default();
+        let preferences = crate::preferences::load_battery_policy();
+        let mut inner = ClientInner::default();
+        inner.status.pause_on_battery = preferences.pause_on_battery;
+        inner.status.pause_on_low_battery_only = preferences.pause_on_low_battery_only;
+        let client = Self(Rc::new(RefCell::new(inner)));
         let weak = Rc::downgrade(&client.0);
         gio::bus_watch_name(
             gio::BusType::Session,
@@ -100,6 +109,41 @@ impl RendererClient {
 
     pub fn apply_video(&self, path: String, callback: impl Fn(Result<(), String>) + 'static) {
         let callback: ApplyCompletion = Box::new(callback);
+        let Some(executable) = renderer_executable() else {
+            callback(Err(
+                "GnomeEngine could not locate gnomeengine-renderer".to_owned()
+            ));
+            return;
+        };
+        let executable = executable.to_string_lossy().into_owned();
+        let client = self.clone();
+        gio::bus_get(
+            gio::BusType::Session,
+            None::<&gio::Cancellable>,
+            move |connection| match connection {
+                Ok(connection) => connection.call(
+                    Some(SHELL_INTEGRATION_NAME),
+                    SHELL_INTEGRATION_PATH,
+                    SHELL_INTEGRATION_INTERFACE,
+                    "EnsureRenderer",
+                    Some(&(executable,).to_variant()),
+                    None,
+                    gio::DBusCallFlags::NONE,
+                    15_000,
+                    None::<&gio::Cancellable>,
+                    move |result| match result {
+                        Ok(_) => client.apply_video_after_shell_ready(path, callback),
+                        Err(error) => callback(Err(shell_integration_error(&error))),
+                    },
+                ),
+                Err(error) => callback(Err(format!(
+                    "Could not connect to the GNOME session bus: {error}"
+                ))),
+            },
+        );
+    }
+
+    fn apply_video_after_shell_ready(&self, path: String, callback: ApplyCompletion) {
         // End the RefCell borrow before entering either branch. The async GTK
         // callback can re-enter this client while installing pending Apply.
         let existing_connection = { self.0.borrow().connection.clone() };
@@ -241,10 +285,72 @@ impl RendererClient {
         enabled: bool,
         callback: impl Fn(Result<(), String>) + 'static,
     ) {
-        self.call(
+        self.set_battery_option(
             "SetPauseOnBattery",
+            enabled,
+            crate::preferences::save_pause_on_battery,
+            |status, enabled| status.pause_on_battery = enabled,
+            callback,
+        );
+    }
+
+    pub fn set_pause_on_low_battery_only(
+        &self,
+        enabled: bool,
+        callback: impl Fn(Result<(), String>) + 'static,
+    ) {
+        self.set_battery_option(
+            "SetPauseOnLowBatteryOnly",
+            enabled,
+            crate::preferences::save_pause_on_low_battery_only,
+            |status, enabled| status.pause_on_low_battery_only = enabled,
+            callback,
+        );
+    }
+
+    fn set_battery_option(
+        &self,
+        method: &'static str,
+        enabled: bool,
+        save_offline: fn(bool) -> Result<(), String>,
+        update_status: fn(&mut RendererStatus, bool),
+        callback: impl Fn(Result<(), String>) + 'static,
+    ) {
+        let connection = { self.0.borrow().connection.clone() };
+        let Some(connection) = connection else {
+            match save_offline(enabled) {
+                Ok(()) => {
+                    let mut status = self.status();
+                    update_status(&mut status, enabled);
+                    publish(&self.0, status);
+                    callback(Ok(()));
+                }
+                Err(error) => callback(Err(error)),
+            }
+            return;
+        };
+
+        let client = self.clone();
+        connection.call(
+            Some(BUS_NAME),
+            OBJECT_PATH,
+            INTERFACE,
+            method,
             Some(&(enabled,).to_variant()),
-            move |result| callback(result.map(|_| ())),
+            None,
+            gio::DBusCallFlags::NONE,
+            5000,
+            None::<&gio::Cancellable>,
+            move |result| match result {
+                Ok(_) => {
+                    let mut status = client.status();
+                    update_status(&mut status, enabled);
+                    publish(&client.0, status);
+                    client.refresh_status();
+                    callback(Ok(()));
+                }
+                Err(error) => callback(Err(error.to_string())),
+            },
         );
     }
 
@@ -372,6 +478,20 @@ fn is_missing_activation_error(error_name: Option<&str>) -> bool {
     )
 }
 
+fn shell_integration_error(error: &glib::Error) -> String {
+    let remote_error = gio::DBusError::remote_error(error);
+    match remote_error.as_deref() {
+        Some("org.freedesktop.DBus.Error.ServiceUnknown") => {
+            "Activate the GnomeEngine extension in GNOME Extensions before applying wallpapers."
+                .to_owned()
+        }
+        Some("io.github.mvk999.GnomeEngine.ShellIntegration.RendererAlreadyRunning") => {
+            "The renderer is already running outside the GNOME 46 Wayland desktop bridge. Stop and restart GnomeEngine before applying a wallpaper.".to_owned()
+        }
+        _ => format!("Could not prepare GNOME desktop integration: {error}"),
+    }
+}
+
 fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnection) {
     disconnect_service(inner);
     let mut subscriptions = Vec::new();
@@ -421,8 +541,12 @@ fn connect_service(inner: &Rc<RefCell<ClientInner>>, connection: gio::DBusConnec
                     }
                     "PolicyChanged" => {
                         if let Some((policy, enabled)) = parameters.get::<(String, bool)>() {
-                            if policy == "pause-on-battery" {
-                                status.pause_on_battery = enabled;
+                            match policy.as_str() {
+                                "pause-on-battery" => status.pause_on_battery = enabled,
+                                "pause-on-low-battery-only" => {
+                                    status.pause_on_low_battery_only = enabled
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -529,7 +653,12 @@ fn disconnect_service(inner: &Rc<RefCell<ClientInner>>) {
         pending.timeout.remove();
         (pending.callback)(Err("Renderer service disconnected".to_owned()));
     }
-    let status = RendererStatus::default();
+    let preferences = crate::preferences::load_battery_policy();
+    let status = RendererStatus {
+        pause_on_battery: preferences.pause_on_battery,
+        pause_on_low_battery_only: preferences.pause_on_low_battery_only,
+        ..RendererStatus::default()
+    };
     publish(inner, status);
 }
 
@@ -612,6 +741,10 @@ fn parse_status(reply: &glib::Variant) -> Result<RendererStatus, String> {
         last_error: optional_string(string("lastError")?),
         pause_reasons: array("pauseReasons")?,
         pause_on_battery: boolean("pauseOnBattery")?,
+        pause_on_low_battery_only: dict
+            .lookup::<bool>("pauseOnLowBatteryOnly")
+            .map_err(|_| "GetStatus field pauseOnLowBatteryOnly has the wrong type".to_owned())?
+            .unwrap_or(false),
         wallpaper_active: boolean("wallpaperActive")?,
         desktop_integration_supported: dict
             .lookup::<bool>("desktopIntegrationReady")
@@ -647,6 +780,7 @@ mod tests {
             ("wallpaperActive".into(), true.to_variant()),
             ("desktopIntegrationReady".into(), true.to_variant()),
             ("pauseOnBattery".into(), true.to_variant()),
+            ("pauseOnLowBatteryOnly".into(), true.to_variant()),
         ]);
         let reply = glib::Variant::tuple_from_iter([fields.to_variant()]);
         let status = parse_status(&reply).unwrap();
@@ -654,6 +788,7 @@ mod tests {
         assert_eq!(status.current_video.as_deref(), Some("/library/a.mp4"));
         assert_eq!(status.pause_reasons, ["on-battery"]);
         assert!(status.pause_on_battery);
+        assert!(status.pause_on_low_battery_only);
         assert!(status.wallpaper_active);
         assert!(status.desktop_integration_supported);
         assert!(status.desktop_integration_ready);
@@ -681,6 +816,7 @@ mod tests {
         let status = parse_status(&reply).unwrap();
         assert!(!status.desktop_integration_supported);
         assert!(!status.desktop_integration_ready);
+        assert!(!status.pause_on_low_battery_only);
         assert!(status.wallpaper_active);
     }
 
