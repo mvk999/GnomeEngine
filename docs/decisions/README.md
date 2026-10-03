@@ -13,3 +13,5 @@ Current records:
 - [ADR-0005: Independent renderer pause reasons](0005-independent-pause-reasons.md)
 - [ADR-0006: Build the Ubuntu artifact with Debian packaging tools](0006-upstream-debhelper-package.md)
 - [ADR-0007: Use a guarded Mutter desktop-window bridge](0007-mutter-desktop-window-bridge.md)
+- [ADR-0008: Ubuntu 24.04 as the minimum runtime baseline](0008-ubuntu-24-04-runtime-baseline.md)
+- [ADR-0009: Small versioned desktop-surface bridges](0009-versioned-desktop-surface-bridges.md)

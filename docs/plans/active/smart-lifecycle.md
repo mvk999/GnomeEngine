@@ -110,10 +110,13 @@ enum integers are hardcoded. GNOME 50 and hardware runtime checks remain open.
 
 ## Battery strategy
 
-The renderer reads UPower `OnBattery` once on the system bus and subscribes to
-property changes. It owns the `on-battery` reason. Do not poll sysfs or let the
-extension monitor battery too. If UPower cannot be reached, log one warning,
-leave `on-battery` clear, and continue normal rendering.
+The renderer subscribes to UPower `OnBattery` and the aggregate DisplayDevice
+`Percentage` on the system bus, then reads initial snapshots without losing
+intervening signals. It owns the `on-battery` reason. Do not poll sysfs or let
+the extension monitor battery too. The default pauses whenever on battery; an
+optional user preference limits that pause to at or below 20%. If UPower or
+the percentage is unavailable, log once and fail open rather than pausing on
+an unknown charge level.
 
 ## Suspend/resume strategy
 

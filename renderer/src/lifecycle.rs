@@ -38,22 +38,25 @@ impl PauseReason {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct LifecyclePolicy {
     pause_reasons: BTreeSet<PauseReason>,
     config: LifecyclePolicyConfig,
     on_battery: bool,
+    battery_percentage: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LifecyclePolicyConfig {
     pub pause_on_battery: bool,
+    pub pause_on_low_battery_only: bool,
 }
 
 impl Default for LifecyclePolicyConfig {
     fn default() -> Self {
         Self {
             pause_on_battery: true,
+            pause_on_low_battery_only: false,
         }
     }
 }
@@ -64,6 +67,7 @@ impl LifecyclePolicy {
             pause_reasons: BTreeSet::new(),
             config,
             on_battery: false,
+            battery_percentage: None,
         }
     }
 
@@ -76,15 +80,51 @@ impl LifecyclePolicy {
             return false;
         }
         self.config.pause_on_battery = enabled;
-        self.set_reason(PauseReason::OnBattery, self.on_battery && enabled);
+        self.reconcile_battery_reason();
+        true
+    }
+
+    pub const fn pause_on_low_battery_only(&self) -> bool {
+        self.config.pause_on_low_battery_only
+    }
+
+    pub fn set_pause_on_low_battery_only(&mut self, enabled: bool) -> bool {
+        if self.config.pause_on_low_battery_only == enabled {
+            return false;
+        }
+        self.config.pause_on_low_battery_only = enabled;
+        self.reconcile_battery_reason();
         true
     }
 
     pub fn on_battery_changed(&mut self, on_battery: bool) -> bool {
         self.on_battery = on_battery;
+        self.reconcile_battery_reason()
+    }
+
+    pub fn on_battery_status_changed(
+        &mut self,
+        on_battery: bool,
+        battery_percentage: Option<f64>,
+    ) -> bool {
+        self.on_battery = on_battery;
+        self.battery_percentage = valid_percentage(battery_percentage);
+        self.reconcile_battery_reason()
+    }
+
+    pub fn on_battery_percentage_changed(&mut self, battery_percentage: Option<f64>) -> bool {
+        self.battery_percentage = valid_percentage(battery_percentage);
+        self.reconcile_battery_reason()
+    }
+
+    fn reconcile_battery_reason(&mut self) -> bool {
+        let percentage_allows_pause = !self.config.pause_on_low_battery_only
+            || self
+                .battery_percentage
+                .is_some_and(|percentage| percentage <= 20.0);
         self.set_reason(
             PauseReason::OnBattery,
-            on_battery && self.config.pause_on_battery,
+            self.config.pause_on_battery && self.on_battery && percentage_allows_pause,
         )
     }
 
@@ -113,6 +153,10 @@ impl LifecyclePolicy {
     pub fn reason_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.reasons().map(PauseReason::as_str)
     }
+}
+
+fn valid_percentage(percentage: Option<f64>) -> Option<f64> {
+    percentage.filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
 }
 
 pub fn should_pause_for_fullscreen(wallpaper_outputs: &[u32], fullscreen_outputs: &[u32]) -> bool {
@@ -174,6 +218,7 @@ mod tests {
         assert!(LifecyclePolicy::default().pause_on_battery());
         assert!(!LifecyclePolicy::with_config(LifecyclePolicyConfig {
             pause_on_battery: false,
+            pause_on_low_battery_only: false,
         })
         .pause_on_battery());
     }
@@ -193,6 +238,49 @@ mod tests {
         assert!(policy
             .reasons()
             .any(|reason| reason == PauseReason::OnBattery));
+    }
+
+    #[test]
+    fn low_battery_only_policy_pauses_at_or_below_twenty_percent() {
+        let mut policy = LifecyclePolicy::with_config(LifecyclePolicyConfig {
+            pause_on_battery: true,
+            pause_on_low_battery_only: true,
+        });
+
+        policy.on_battery_status_changed(true, Some(20.1));
+        assert!(!policy.is_paused());
+        policy.on_battery_percentage_changed(Some(20.0));
+        assert_eq!(policy.reason_names().collect::<Vec<_>>(), ["on-battery"]);
+        policy.on_battery_percentage_changed(Some(19.9));
+        assert!(policy.is_paused());
+        policy.on_battery_percentage_changed(Some(25.0));
+        assert!(!policy.is_paused());
+    }
+
+    #[test]
+    fn low_battery_only_fails_open_when_percentage_is_unavailable() {
+        let mut policy = LifecyclePolicy::with_config(LifecyclePolicyConfig {
+            pause_on_battery: true,
+            pause_on_low_battery_only: true,
+        });
+
+        policy.on_battery_status_changed(true, None);
+        assert!(!policy.is_paused());
+        policy.on_battery_percentage_changed(Some(f64::NAN));
+        assert!(!policy.is_paused());
+    }
+
+    #[test]
+    fn low_battery_policy_never_pauses_on_ac_and_preserves_other_reasons() {
+        let mut policy = LifecyclePolicy::with_config(LifecyclePolicyConfig {
+            pause_on_battery: true,
+            pause_on_low_battery_only: true,
+        });
+
+        policy.on_battery_status_changed(false, Some(5.0));
+        assert!(!policy.is_paused());
+        policy.set_reason(PauseReason::Fullscreen, true);
+        assert_eq!(policy.reason_names().collect::<Vec<_>>(), ["fullscreen"]);
     }
 
     #[test]

@@ -7,7 +7,7 @@ GNOME Shell extension
   ├─ Mutter fullscreen + monitor topology ─┐
   ├─ GNOME session-mode lock state ────────┼─ session D-Bus ─▶ renderer
   └─ built-in display power (when exposed) ┘                  │
-UPower OnBattery ──────────────── system D-Bus ───────────────┤
+UPower OnBattery + Percentage ─── system D-Bus ───────────────┤
 logind PrepareForSleep ────────── system D-Bus ───────────────┘
                                                                ▼
                                                      LifecyclePolicy
@@ -30,27 +30,35 @@ video frames.
 | `fullscreen` | Shell extension | Fullscreen covers the output currently treated as the wallpaper output |
 | `screen-locked` | Shell extension | Session mode is `unlock-dialog` |
 | `display-off` | Shell extension | Built-in laptop panel is reported off by Mutter |
-| `on-battery` | Renderer / UPower | UPower reports `OnBattery=true`; default policy pauses |
+| `on-battery` | Renderer / UPower | Master policy is enabled and UPower reports on-battery; optionally limited to charge `<= 20%` |
 | `system-sleep` | Renderer / logind | `PrepareForSleep(true)` is active |
 
 `Pause()` adds `manual`; `Resume()` removes only `manual`. Playback is
-permitted only if a wallpaper is active and the set is empty. `Stop()` removes
+permitted only if a wallpaper is active and the set is empty. A regular,
+non-fullscreen window covering part of the desktop is not a pause reason; only
+the Shell's actual fullscreen event adds `fullscreen`. `Stop()` removes
 the pipeline and active wallpaper, independently of automatic reasons. New
 wallpaper playback reconciles against the current set, so it does not bypass
 an active condition. GStreamer moves to `PAUSED` and resumes the existing
 pipeline position when the final reason clears. Battery pausing defaults on in
-an internal `LifecyclePolicyConfig`. M4 exposes the battery policy through the
-native app and persists it in renderer-owned
-`$XDG_CONFIG_HOME/gnomeengine/lifecycle.ini`, so the setting remains effective
-while the app is closed. Missing or invalid configuration falls back to
-pause-on-battery enabled.
+an internal `LifecyclePolicyConfig`. The native app exposes two battery
+preferences: pause whenever the system is on battery (default enabled), and
+pause on battery only at `20%` charge or below (default disabled). UPower's
+aggregate DisplayDevice `Percentage` is observed by event-driven D-Bus signals.
+In threshold-only mode an unavailable/invalid percentage fails open. The app
+can read and write the same
+`$XDG_CONFIG_HOME/gnomeengine/lifecycle.ini` while the renderer is absent,
+without starting the renderer; when it is running, typed D-Bus methods update
+the live policy and renderer-owned config. Missing or invalid configuration
+falls back to the original pause-on-battery-enabled behavior.
 
 The service exposes `SetPauseReason(reason, active)` for controlled lifecycle
 updates, rejects names outside the six-value vocabulary, and emits
 `PauseReasonsChanged(as)` only after an actual set change. `GetStatus()` returns
 state, active video, last error, `pauseReasons`, whether playback is active,
-and the `pauseOnBattery` preference. M4 adds typed `SetPauseOnBattery(b)` and
-`PolicyChanged(s,b)`. `StateChanged` remains reserved for effective
+and both battery preferences. M4's `SetPauseOnBattery(b)` remains stable; the
+low-battery option adds `SetPauseOnLowBatteryOnly(b)`. `PolicyChanged(s,b)`
+reports each preference. `StateChanged` remains reserved for effective
 renderer-state changes.
 
 ## Event sources and failure behavior
@@ -68,9 +76,9 @@ renderer-state changes.
 - Topology: `monitors-changed` re-queries the primary monitor and fullscreen
   state; no monitor index is retained across changes.
 - Battery: the renderer subscribes to UPower `PropertiesChanged` before
-  requesting the initial `OnBattery` property. A signal observed during the
-  initial read takes precedence over the snapshot. UPower/bus failure logs a
-  warning and does not stop the renderer.
+  requesting initial `OnBattery` and DisplayDevice `Percentage` snapshots.
+  Signals observed during either initial read take precedence over snapshots.
+  UPower/bus failure logs a warning and does not stop the renderer.
 - Suspend: the renderer subscribes to logind `PrepareForSleep`. `true` adds
   `system-sleep`; `false` removes only that reason. No inhibitor is acquired.
 

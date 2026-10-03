@@ -6,6 +6,7 @@ use crate::controller::RendererController;
 
 const UPOWER_NAME: &str = "org.freedesktop.UPower";
 const UPOWER_PATH: &str = "/org/freedesktop/UPower";
+const UPOWER_DISPLAY_DEVICE_PATH: &str = "/org/freedesktop/UPower/devices/DisplayDevice";
 const LOGIN_NAME: &str = "org.freedesktop.login1";
 const LOGIN_PATH: &str = "/org/freedesktop/login1";
 
@@ -33,6 +34,7 @@ impl SystemObservers {
 
                 let mut subscriptions = Vec::new();
                 observe_upower(&connection, controller.clone(), &mut subscriptions);
+                observe_battery_percentage(&connection, controller.clone(), &mut subscriptions);
                 observe_logind(&connection, controller, &mut subscriptions);
                 *retained.borrow_mut() = Some((connection, subscriptions));
             },
@@ -115,6 +117,79 @@ fn observe_upower(
 
 fn set_battery_reason(controller: &RendererController, on_battery: bool) {
     controller.on_battery_changed(on_battery);
+}
+
+fn observe_battery_percentage(
+    connection: &gio::DBusConnection,
+    controller: RendererController,
+    subscriptions: &mut Vec<gio::SignalSubscriptionId>,
+) {
+    let initializing = Rc::new(RefCell::new(true));
+    let pending_signal = Rc::new(RefCell::new(None::<Option<f64>>));
+    let init_for_signal = initializing.clone();
+    let pending_for_signal = pending_signal.clone();
+    let controller_for_signal = controller.clone();
+    let subscription = connection.signal_subscribe(
+        Some(UPOWER_NAME),
+        Some("org.freedesktop.DBus.Properties"),
+        Some("PropertiesChanged"),
+        Some(UPOWER_DISPLAY_DEVICE_PATH),
+        Some("org.freedesktop.UPower.Device"),
+        gio::DBusSignalFlags::NONE,
+        move |_, _, _, _, _, parameters| {
+            if let Some((_, changed, invalidated)) = parameters.get::<(
+                String,
+                std::collections::HashMap<String, glib::Variant>,
+                Vec<String>,
+            )>() {
+                let update = changed.get("Percentage").map(|value| {
+                    value
+                        .get::<f64>()
+                        .filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
+                });
+                if let Some(percentage) = update.or_else(|| {
+                    invalidated
+                        .iter()
+                        .any(|property| property == "Percentage")
+                        .then_some(None)
+                }) {
+                    if *init_for_signal.borrow() {
+                        *pending_for_signal.borrow_mut() = Some(percentage);
+                    } else {
+                        controller_for_signal.on_battery_percentage_changed(percentage);
+                    }
+                }
+            }
+        },
+    );
+    subscriptions.push(subscription);
+
+    let controller_for_snapshot = controller;
+    connection.call(
+        Some(UPOWER_NAME),
+        UPOWER_DISPLAY_DEVICE_PATH,
+        "org.freedesktop.DBus.Properties",
+        "Get",
+        Some(&("org.freedesktop.UPower.Device", "Percentage").to_variant()),
+        None,
+        gio::DBusCallFlags::NONE,
+        3000,
+        None::<&gio::Cancellable>,
+        move |result| {
+            let snapshot = result.ok().and_then(|reply| {
+                reply
+                    .get::<(glib::Variant,)>()
+                    .and_then(|(value,)| value.get::<f64>())
+                    .filter(|value| value.is_finite() && (0.0..=100.0).contains(value))
+            });
+            let final_value = pending_signal.borrow_mut().take().unwrap_or(snapshot);
+            *initializing.borrow_mut() = false;
+            if final_value.is_none() {
+                eprintln!("gnomeengine-renderer: UPower battery percentage unavailable; low-battery threshold policy will fail open");
+            }
+            controller_for_snapshot.on_battery_percentage_changed(final_value);
+        },
+    );
 }
 
 fn observe_logind(

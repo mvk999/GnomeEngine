@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::Path, rc::Rc};
+use std::{cell::RefCell, path::Path, rc::Rc, sync::Once};
 
 use gio::prelude::*;
 use gst::prelude::*;
@@ -11,6 +11,7 @@ pub const BUS_NAME: &str = "io.github.mvk999.GnomeEngine.Renderer";
 pub const GTK_APPLICATION_ID: &str = "io.github.mvk999.GnomeEngine.Renderer";
 pub const OBJECT_PATH: &str = "/io/github/mvk999/GnomeEngine/Renderer";
 pub const INTERFACE: &str = "io.github.mvk999.GnomeEngine.Renderer";
+static GRAPHICS_DIAGNOSTICS_LOGGED: Once = Once::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RendererState {
@@ -36,7 +37,6 @@ impl RendererState {
 struct ActivePlayback {
     backend: PlaybackBackend,
     window: gtk::Window,
-    _application: gtk::Application,
 }
 
 enum PlaybackBackend {
@@ -61,6 +61,10 @@ enum PlaybackControl {
 
 struct ControllerInner {
     active: Option<ActivePlayback>,
+    // Register GtkApplication once for the renderer process lifetime. Creating
+    // and registering a new application for every Apply re-exports the same
+    // org.gtk.Application object path after Stop and fails on the second Apply.
+    application: Option<gtk::Application>,
     state: RendererState,
     current_video: Option<String>,
     last_error: Option<String>,
@@ -81,6 +85,7 @@ impl RendererController {
     pub fn new_with_policy_config(config: LifecyclePolicyConfig) -> Self {
         Self(Rc::new(RefCell::new(ControllerInner {
             active: None,
+            application: None,
             state: RendererState::Stopped,
             current_video: None,
             last_error: None,
@@ -121,6 +126,10 @@ impl RendererController {
         status.insert("wallpaperActive", inner.active.is_some());
         status.insert("desktopIntegrationReady", inner.desktop_integration_ready);
         status.insert("pauseOnBattery", inner.lifecycle.pause_on_battery());
+        status.insert(
+            "pauseOnLowBatteryOnly",
+            inner.lifecycle.pause_on_low_battery_only(),
+        );
         status.end()
     }
 
@@ -156,6 +165,15 @@ impl RendererController {
         self.after_reason_change(changed);
     }
 
+    pub fn on_battery_percentage_changed(&self, percentage: Option<f64>) {
+        let changed = self
+            .0
+            .borrow_mut()
+            .lifecycle
+            .on_battery_percentage_changed(percentage);
+        self.after_reason_change(changed);
+    }
+
     pub fn set_pause_on_battery(&self, enabled: bool) -> Result<(), String> {
         if self.0.borrow().lifecycle.pause_on_battery() == enabled {
             return Ok(());
@@ -173,6 +191,26 @@ impl RendererController {
         if policy_changed {
             self.emit_signal("PolicyChanged", &("pause-on-battery", enabled).to_variant());
         }
+        Ok(())
+    }
+
+    pub fn set_pause_on_low_battery_only(&self, enabled: bool) -> Result<(), String> {
+        if self.0.borrow().lifecycle.pause_on_low_battery_only() == enabled {
+            return Ok(());
+        }
+        crate::preferences::save_pause_on_low_battery_only(enabled)?;
+        let changed = self
+            .0
+            .borrow_mut()
+            .lifecycle
+            .set_pause_on_low_battery_only(enabled);
+        if changed {
+            self.after_reason_change(true);
+        }
+        self.emit_signal(
+            "PolicyChanged",
+            &("pause-on-low-battery-only", enabled).to_variant(),
+        );
         Ok(())
     }
 
@@ -226,23 +264,44 @@ impl RendererController {
         gtk::init().map_err(|error| format!("GTK initialization failed: {error}"))?;
         let display = gdk::Display::default()
             .ok_or_else(|| "no GDK display is available for the wallpaper surface".to_owned())?;
+        log_graphics_diagnostics(&display);
         if !display.supports_input_shapes() {
             return Err(
                 "the display backend cannot make the wallpaper surface input-transparent"
                     .to_owned(),
             );
         }
+        eprintln!("INFO renderer applying video on {}", display.type_().name());
 
-        let application =
-            gtk::Application::new(Some(GTK_APPLICATION_ID), gio::ApplicationFlags::NON_UNIQUE);
-        application
-            .register(None::<&gio::Cancellable>)
-            .map_err(|error| format!("cannot register renderer GTK application: {error}"))?;
+        // Noble does not ship gtk4paintablesink as a system GStreamer plugin.
+        // Register the upstream plugin privately in this process so the
+        // renderer can keep its custom GStreamer pipeline without changing the
+        // system plugin path. GTK is initialized above, as required by the
+        // plugin's GTK-backed element registration.
+        if gst::ElementFactory::find("gtk4paintablesink").is_none() {
+            eprintln!("INFO renderer registering bundled GTK4 GStreamer sink");
+            if let Err(error) = gstgtk4::plugin_register_static() {
+                eprintln!("WARNING renderer could not register bundled GTK4 sink: {error}");
+            }
+        }
+
+        let application = self.registered_application()?;
         let (video_widget, pending_backend) = Self::build_video_output(&path)?;
+        eprintln!("INFO renderer constructed video output");
+        let (default_width, default_height) = display
+            .monitors()
+            .item(0)
+            .and_then(|monitor| monitor.downcast::<gdk::Monitor>().ok())
+            .map(|monitor| {
+                let geometry = monitor.geometry();
+                (geometry.width(), geometry.height())
+            })
+            .filter(|(width, height)| *width > 0 && *height > 0)
+            .unwrap_or((960, 540));
         let window = gtk::Window::builder()
             .title("GnomeEngine Wallpaper Surface")
-            .default_width(960)
-            .default_height(540)
+            .default_width(default_width)
+            .default_height(default_height)
             .decorated(false)
             .child(&video_widget)
             .build();
@@ -254,6 +313,12 @@ impl RendererController {
                 surface.set_input_region(&empty_input_region);
             }
         });
+        gtk::prelude::WidgetExt::realize(&window);
+        eprintln!("INFO renderer realized desktop surface");
+        if gtk::prelude::WidgetExt::display(&window).is::<gdk4_x11::X11Display>() {
+            crate::desktop_integration::configure_x11_desktop_surface(&window)?;
+            eprintln!("INFO renderer configured the X11 surface as an EWMH desktop window");
+        }
 
         let backend = match pending_backend {
             PendingBackend::GStreamer(pipeline) => {
@@ -306,7 +371,6 @@ impl RendererController {
             inner.active = Some(ActivePlayback {
                 backend,
                 window: window.clone(),
-                _application: application,
             });
         }
         self.set_state(RendererState::Loading);
@@ -329,6 +393,11 @@ impl RendererController {
             eprintln!("INFO renderer using GTK media backend (gtk4paintablesink unavailable)");
         }
         window.present();
+        eprintln!("INFO renderer presented desktop surface");
+        if gtk::prelude::WidgetExt::display(&window).is::<gdk4_x11::X11Display>() {
+            crate::desktop_integration::set_x11_surface_non_focusable(&window)?;
+            eprintln!("INFO renderer confirmed X11 surface cannot accept keyboard focus");
+        }
         self.reconcile_playback();
         eprintln!("INFO renderer initialized; GStreamer autoplugging enabled");
         Ok(())
@@ -345,9 +414,11 @@ impl RendererController {
                 .media_stream()
                 .ok_or_else(|| "GTK could not create a media stream for this video".to_owned())?;
             stream.set_muted(true);
+            eprintln!("INFO renderer selected GTK media playback fallback");
             return Ok((video.upcast(), PendingBackend::GtkMedia(stream)));
         }
 
+        eprintln!("INFO renderer selected GStreamer gtk4paintablesink");
         let sink = gst::ElementFactory::make("gtk4paintablesink")
             .build()
             .map_err(|error| format!("cannot create GTK GStreamer sink: {error}"))?;
@@ -369,6 +440,21 @@ impl RendererController {
             .map_err(|error| format!("cannot create audio fakesink: {error}"))?;
         pipeline.set_property("audio-sink", &audio_sink);
         Ok((picture.upcast(), PendingBackend::GStreamer(pipeline)))
+    }
+
+    fn registered_application(&self) -> Result<gtk::Application, String> {
+        let existing = { self.0.borrow().application.clone() };
+        if let Some(application) = existing {
+            return Ok(application);
+        }
+
+        let application =
+            gtk::Application::new(Some(GTK_APPLICATION_ID), gio::ApplicationFlags::NON_UNIQUE);
+        application
+            .register(None::<&gio::Cancellable>)
+            .map_err(|error| format!("cannot register renderer GTK application: {error}"))?;
+        self.0.borrow_mut().application = Some(application.clone());
+        Ok(application)
     }
 
     pub fn stop(&self) {
@@ -487,6 +573,28 @@ impl RendererController {
             }
         }
     }
+}
+
+fn log_graphics_diagnostics(display: &gdk::Display) {
+    GRAPHICS_DIAGNOSTICS_LOGGED.call_once(|| {
+        let session = std::env::var("XDG_SESSION_TYPE").unwrap_or_else(|_| "unknown".to_owned());
+        let backend = display.type_().name();
+        let gtk_version = format!(
+            "{}.{}.{}",
+            gtk::major_version(),
+            gtk::minor_version(),
+            gtk::micro_version()
+        );
+        eprintln!(
+            "INFO renderer graphics runtime: session={session}, gdk={backend}, GTK={gtk_version}, GStreamer={}",
+            gst::version_string()
+        );
+        if backend.contains("X11") {
+            eprintln!("INFO renderer X11 path: GDK X11 surface + EWMH desktop hints; GStreamer chooses EGL/GLX based on available capabilities");
+        } else if backend.contains("Wayland") {
+            eprintln!("INFO renderer Wayland path: native GDK Wayland surface; GStreamer chooses EGL based on available capabilities");
+        }
+    });
 }
 
 #[cfg(test)]
@@ -610,6 +718,7 @@ mod tests {
         let controller =
             RendererController::new_with_policy_config(crate::lifecycle::LifecyclePolicyConfig {
                 pause_on_battery: false,
+                pause_on_low_battery_only: false,
             });
 
         controller.on_battery_changed(true);

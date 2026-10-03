@@ -8,9 +8,11 @@ session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
 
 ## Renderer and desktop-surface smoke check
 
-1. Check whether `gtk4paintablesink` is discoverable. If it is absent, confirm
-   the platform's GTK media backend is installed; the renderer should select
-   the GtkVideo fallback and report that choice in its log.
+1. The renderer privately registers the bundled upstream `gtk4paintablesink`
+   if the system factory is absent. Confirm renderer logs identify the selected
+   sink; if static registration fails, verify the platform GTK media backend
+   exists for the `GtkVideo` fallback. Do not infer the active EGL/GLX or
+   DMA-BUF path from plugin compilation alone.
 2. On GNOME 50+ Wayland with the GnomeEngine extension enabled, apply a local
    video through the app.
 3. Confirm it appears behind normal windows as the desktop, with no player
@@ -29,9 +31,15 @@ Run only in a disposable or nested supported GNOME 50+ Wayland session.
 - [ ] renderer service starts and exports its D-Bus API
 - [ ] video playback starts and manual Pause/Resume preserves position
 - [ ] fullscreen automatically pauses and leaving fullscreen resumes
+- [ ] an ordinary, non-fullscreen window covering part of the desktop does not
+  pause playback; only a real fullscreen window on the primary display adds
+  the `fullscreen` pause reason
 - [ ] a visible secondary rendered output prevents global fullscreen pause
 - [ ] lock pauses; repeated lock/unlock does not stick or duplicate reasons
 - [ ] battery transition pauses; AC reconnect resumes when appropriate
+- [ ] with "Somente com 20% de bateria ou menos" enabled, charge above 20%
+  keeps playback running on battery; at 20% or below it pauses, and above the
+  threshold it resumes. AC always clears the battery reason.
 - [ ] display power changes pause/resume on supported built-in panel hardware
 - [ ] suspend pauses; resume removes only `system-sleep`
 - [ ] monitor hotplug recomputes fullscreen/output state without a crash
@@ -46,7 +54,17 @@ Run only in a disposable or nested supported GNOME 50+ Wayland session.
 - [ ] renderer itself never activates fullscreen pause on the primary output
 - [ ] target stacking leaves panel, notifications, and system dialogs above wallpaper
 - [ ] monitor topology change resizes the wallpaper surface to the primary output
+- [ ] wallpaper geometry log reports the full monitor rectangle, regardless of
+  a smaller work area; on X11, `xprop` shows `_NET_WM_WINDOW_TYPE_DESKTOP` and
+  no `_NET_WM_STRUT` or `_NET_WM_STRUT_PARTIAL`
 - [ ] measure playing, paused, and stopped CPU/RSS with identical media/session
+
+For the full-monitor coverage regression, compare monitor, workspace work-area,
+and renderer frame from the single `GnomeEngine: wallpaper geometry` log. The
+renderer frame must match the monitor rectangle; the work area is diagnostic
+only. On X11, `xwininfo` can confirm the mapped surface dimensions and `xprop`
+can inspect its EWMH type and absence of strut properties. Do not change panel
+or dock settings as part of this test.
 
 Record unavailable battery, display, suspend, multi-monitor, or performance
 tests explicitly; never infer them from unit tests.
@@ -67,6 +85,9 @@ otherwise the renderer should fail closed without a player window.
 - [ ] Apply from detail with the extension enabled; verify the renderer surface
   becomes desktop content. Without the extension, verify a clear error and no
   visible GTK player window.
+- [ ] Repeat Apply → Stop → Apply at least three times, including the same
+  wallpaper twice; the renderer process and D-Bus service should remain usable
+  and every Apply should create a fresh desktop surface.
 - [ ] Current renderer status and pause reasons are reflected; no status timer
   is active.
 - [ ] Stop is explicit. Quit/close the app and verify it does not call Stop;
@@ -82,11 +103,15 @@ otherwise the renderer should fail closed without a player window.
 - [ ] Open/leave preview repeatedly and verify there is no accumulating
   renderer/preview process or persistent app process after quitting.
 
-The host used for implementation is GNOME Shell 46 on X11; Gtk4's
-`gtk4paintablesink` plugin is unavailable, although GTK's GStreamer media
-backend is installed. The fallback compiles but still needs graphical runtime
-validation. Mark graphical/runtime items above not validated on this host
-rather than treating compilation or unit tests as visual validation.
+The host used for implementation is Ubuntu 24.04.5 / GNOME Shell 46 / X11.
+The system `gtk4paintablesink` is absent, while the Noble-built renderer
+registers its bundled upstream plugin. A D-Bus Apply/Stop smoke reached
+`playing`/`stopped` on this Xorg host; the corresponding EWMH type, workspace,
+taskbar/pager, and non-focusable hints were observed with `xprop`. A separate
+GNOME46 nested Wayland smoke loaded the extension, started its owned renderer,
+and completed Apply/Stop. Neither smoke proves the full desktop UX or lifecycle.
+Mark all unobserved Alt+Tab, Overview, workspace, input, lock, suspend, and
+GNOME 50 behavior not validated.
 
 ## M6 GUI V1 checklist
 
@@ -110,8 +135,12 @@ target graphical review.
   while the renderer is stopped must trigger activation/start rather than be
   disabled; verify Apply and Stop against D-Bus state, then navigate away and
   confirm preview teardown.
-- [ ] Visit Displays and Settings; confirm no monitor data is fabricated and
-  only the existing battery-pause preference is configurable.
+- [ ] Visit Displays and Settings; confirm no monitor data is fabricated.
+- [ ] With the renderer stopped/unavailable, both battery controls remain
+  usable, persist across app restart, and do not start a renderer process.
+- [ ] Toggle the battery master while playback is active; verify policy takes
+  effect immediately. The 20% sub-option is sensitive only while the master is
+  enabled.
 - [ ] Exercise renderer unavailable/recovery state and About.
 - [ ] Review wide, medium/tiled, and narrow layouts, keyboard navigation,
   accessible labels, and the system light/dark schemes.
@@ -122,8 +151,9 @@ Intentional differences from the HTML: mobile bottom navigation is replaced by
 native adaptive split navigation; the Displays page reports only known session
 and renderer information because no monitor inventory API exists; the app
 uses the system font and color scheme; demo controls, mock wallpapers, and
-unsupported settings are omitted. The renderer integration uses Mutter's
-desktop window type and still requires the target-session validation below.
+unsupported settings are omitted. The renderer integration uses
+version/backend-specific bridges and still requires the target-session
+validation below.
 
 ## M5 Ubuntu package acceptance
 
@@ -132,11 +162,13 @@ build script itself must not use sudo or modify system paths.
 
 - [ ] `./scripts/check-package.sh` passes desktop, AppStream, extension, D-Bus
   activation, version, and SPDX checks.
-- [ ] `./scripts/build-deb.sh` builds `dist/gnomeengine_<version>_amd64.deb`.
+- [ ] `./scripts/build-deb.sh` builds a target-labelled
+      `dist/gnomeengine_<version>_ubuntu26.04_amd64.deb` and `SHA256SUMS`.
 - [ ] `dpkg-deb -I` and `dpkg-deb -c` show the expected package metadata and
   only the app, renderer, desktop data, icon, service, and UUID-matched
   extension; no build tree or Node modules are present.
-- [ ] Install explicitly with `sudo apt install ./dist/gnomeengine_*.deb` and
+- [ ] Install explicitly with
+      `sudo apt install ./dist/gnomeengine_<version>_ubuntu26.04_amd64.deb` and
   verify `gnomeengine` appears in the app grid and `gnome-extensions info`
   recognizes the system extension.
 - [ ] Verify the renderer starts through session D-Bus activation only after

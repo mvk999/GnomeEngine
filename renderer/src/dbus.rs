@@ -78,6 +78,18 @@ fn dispatch_method(
                 "SetPauseOnBattery requires an enabled boolean",
             ),
         },
+        "SetPauseOnLowBatteryOnly" => match parameters.get::<(bool,)>() {
+            Some((enabled,)) => match controller.set_pause_on_low_battery_only(enabled) {
+                Ok(()) => invocation.return_value(None),
+                Err(error) => {
+                    invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &error)
+                }
+            },
+            None => invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "SetPauseOnLowBatteryOnly requires an enabled boolean",
+            ),
+        },
         "SetDesktopIntegrationReady" => match parameters.get::<(bool,)>() {
             Some((ready,)) => {
                 controller.set_desktop_integration_ready(ready);
@@ -104,6 +116,9 @@ mod tests {
         let node = gio::DBusNodeInfo::for_xml(INTERFACE_XML).unwrap();
         let interface = node.lookup_interface(crate::controller::INTERFACE).unwrap();
         assert!(interface.lookup_method("SetPauseOnBattery").is_some());
+        assert!(interface
+            .lookup_method("SetPauseOnLowBatteryOnly")
+            .is_some());
         assert!(interface
             .lookup_method("SetDesktopIntegrationReady")
             .is_some());

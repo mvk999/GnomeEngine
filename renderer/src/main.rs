@@ -4,6 +4,7 @@ use gstreamer as gst;
 
 mod controller;
 mod dbus;
+mod desktop_integration;
 pub mod lifecycle;
 mod power;
 mod preferences;
