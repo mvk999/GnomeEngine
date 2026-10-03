@@ -6,6 +6,7 @@ mod controller;
 mod dbus;
 pub mod lifecycle;
 mod power;
+mod preferences;
 
 use controller::{RendererController, BUS_NAME};
 
@@ -22,7 +23,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let initial_video = env::args_os()
         .nth(1)
         .map(|path| path.to_string_lossy().into_owned());
-    let controller = RendererController::new();
+    let controller = RendererController::new_with_policy_config(preferences::load());
     let system_observers = power::SystemObservers::default();
     system_observers.start(controller.clone());
     let main_loop = glib::MainLoop::new(None, false);

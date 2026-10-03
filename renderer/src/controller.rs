@@ -51,6 +51,7 @@ struct ControllerInner {
 pub struct RendererController(Rc<RefCell<ControllerInner>>);
 
 impl RendererController {
+    #[cfg(test)]
     pub fn new() -> Self {
         Self::new_with_policy_config(LifecyclePolicyConfig::default())
     }
@@ -95,6 +96,7 @@ impl RendererController {
         status.insert("lastError", inner.last_error.as_deref().unwrap_or_default());
         status.insert("pauseReasons", &reasons);
         status.insert("wallpaperActive", inner.active.is_some());
+        status.insert("pauseOnBattery", inner.lifecycle.pause_on_battery());
         status.end()
     }
 
@@ -107,8 +109,28 @@ impl RendererController {
     }
 
     pub fn on_battery_changed(&self, on_battery: bool) {
-        let pause_on_battery = self.0.borrow().lifecycle.pause_on_battery();
-        self.set_reason(PauseReason::OnBattery, on_battery && pause_on_battery);
+        let changed = self.0.borrow_mut().lifecycle.on_battery_changed(on_battery);
+        self.after_reason_change(changed);
+    }
+
+    pub fn set_pause_on_battery(&self, enabled: bool) -> Result<(), String> {
+        if self.0.borrow().lifecycle.pause_on_battery() == enabled {
+            return Ok(());
+        }
+        crate::preferences::save_pause_on_battery(enabled)?;
+        let (changed, policy_changed) = {
+            let mut inner = self.0.borrow_mut();
+            let was_enabled = inner.lifecycle.pause_on_battery();
+            let changed = inner.lifecycle.set_pause_on_battery(enabled);
+            (changed, was_enabled != enabled)
+        };
+        if changed {
+            self.after_reason_change(true);
+        }
+        if policy_changed {
+            self.emit_signal("PolicyChanged", &("pause-on-battery", enabled).to_variant());
+        }
+        Ok(())
     }
 
     pub fn on_system_sleep_changed(&self, preparing_for_sleep: bool) {

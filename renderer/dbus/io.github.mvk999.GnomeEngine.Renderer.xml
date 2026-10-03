@@ -13,6 +13,9 @@
       <arg name="reason" type="s" direction="in"/>
       <arg name="active" type="b" direction="in"/>
     </method>
+    <method name="SetPauseOnBattery">
+      <arg name="enabled" type="b" direction="in"/>
+    </method>
     <signal name="StateChanged">
       <arg name="state" type="s"/>
     </signal>
@@ -21,6 +24,10 @@
     </signal>
     <signal name="PauseReasonsChanged">
       <arg name="reasons" type="as"/>
+    </signal>
+    <signal name="PolicyChanged">
+      <arg name="policy" type="s"/>
+      <arg name="enabled" type="b"/>
     </signal>
   </interface>
 </node>

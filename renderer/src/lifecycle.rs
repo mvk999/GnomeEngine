@@ -42,6 +42,7 @@ impl PauseReason {
 pub struct LifecyclePolicy {
     pause_reasons: BTreeSet<PauseReason>,
     config: LifecyclePolicyConfig,
+    on_battery: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,11 +63,29 @@ impl LifecyclePolicy {
         Self {
             pause_reasons: BTreeSet::new(),
             config,
+            on_battery: false,
         }
     }
 
     pub const fn pause_on_battery(&self) -> bool {
         self.config.pause_on_battery
+    }
+
+    pub fn set_pause_on_battery(&mut self, enabled: bool) -> bool {
+        if self.config.pause_on_battery == enabled {
+            return false;
+        }
+        self.config.pause_on_battery = enabled;
+        self.set_reason(PauseReason::OnBattery, self.on_battery && enabled);
+        true
+    }
+
+    pub fn on_battery_changed(&mut self, on_battery: bool) -> bool {
+        self.on_battery = on_battery;
+        self.set_reason(
+            PauseReason::OnBattery,
+            on_battery && self.config.pause_on_battery,
+        )
     }
 
     pub fn set_reason(&mut self, reason: PauseReason, active: bool) -> bool {
@@ -157,6 +176,23 @@ mod tests {
             pause_on_battery: false,
         })
         .pause_on_battery());
+    }
+
+    #[test]
+    fn battery_setting_reconciles_an_already_observed_power_state() {
+        let mut policy = LifecyclePolicy::default();
+        policy.on_battery_changed(true);
+        assert!(policy
+            .reasons()
+            .any(|reason| reason == PauseReason::OnBattery));
+
+        policy.set_pause_on_battery(false);
+        assert!(!policy.is_paused());
+
+        policy.set_pause_on_battery(true);
+        assert!(policy
+            .reasons()
+            .any(|reason| reason == PauseReason::OnBattery));
     }
 
     #[test]

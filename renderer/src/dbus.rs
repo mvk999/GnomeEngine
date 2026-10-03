@@ -66,9 +66,34 @@ fn dispatch_method(
                 "SetPauseReason requires a reason string and active boolean",
             ),
         },
+        "SetPauseOnBattery" => match parameters.get::<(bool,)>() {
+            Some((enabled,)) => match controller.set_pause_on_battery(enabled) {
+                Ok(()) => invocation.return_value(None),
+                Err(error) => {
+                    invocation.return_dbus_error("org.freedesktop.DBus.Error.Failed", &error)
+                }
+            },
+            None => invocation.return_dbus_error(
+                "org.freedesktop.DBus.Error.InvalidArgs",
+                "SetPauseOnBattery requires an enabled boolean",
+            ),
+        },
         _ => invocation.return_dbus_error(
             "org.freedesktop.DBus.Error.UnknownMethod",
             "unknown renderer method",
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::INTERFACE_XML;
+
+    #[test]
+    fn renderer_contract_declares_pause_policy_m4_api() {
+        let node = gio::DBusNodeInfo::for_xml(INTERFACE_XML).unwrap();
+        let interface = node.lookup_interface(crate::controller::INTERFACE).unwrap();
+        assert!(interface.lookup_method("SetPauseOnBattery").is_some());
+        assert!(interface.lookup_signal("PolicyChanged").is_some());
     }
 }
