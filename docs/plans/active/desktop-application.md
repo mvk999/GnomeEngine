@@ -183,6 +183,9 @@ clean only app-owned staging directories.
   pause preference owned by the renderer.
 - [x] Added About, native preferences, keyboard shortcuts, confirmation before
   deleting a managed copy, and policy/preference/D-Bus contract tests.
+- [x] Fixed the initial Library page selection: GtkStack had been showing the
+  first-added empty detail page instead of Library. Import and chooser failures
+  now include the concrete reason in their toast as well as the terminal log.
 - [x] Canonical checks pass after implementation: 11 app tests, 19 renderer
   tests, Clippy with warnings denied, rustfmt, extension syntax, and
   `cargo build --workspace`.
@@ -200,6 +203,12 @@ clean only app-owned staging directories.
   repository evidence while keeping M1 marked incomplete.
 - `ApplyVideo` currently opens a normal GTK window, so an app integration test
   can validate D-Bus control but cannot validate desktop wallpaper behavior.
+- The initial blank GUI was caused by GtkStack's default first-child selection:
+  the empty detail widget was inserted before Library. The import action also
+  switched to Library before opening the chooser, masking this initial-state
+  bug while still giving no welcome content. Import errors were previously
+  reduced to a generic toast; include the underlying reason to make media/plugin
+  failures diagnosable.
 - `libadwaita-1-dev` is not installed system-wide; headers/pkg-config metadata
   were extracted under `/tmp` for local compilation. CI installs the package.
   Host GNOME 46/X11 and missing `gtk4paintablesink` do not permit validating

@@ -192,6 +192,10 @@ impl MainWindow {
             ),
             Some("library"),
         );
+        // GtkStack displays its first child by default. The detail container is
+        // added above as a reusable destination, so explicitly select Library
+        // before presenting the window (otherwise users see a blank page).
+        stack.set_visible_child_name("library");
         toolbar.set_content(Some(&stack));
         toast_overlay.set_child(Some(&toolbar));
         window.set_content(Some(&toast_overlay));
@@ -292,8 +296,9 @@ impl MainWindow {
                             Err(error) if error.matches(gio::IOErrorEnum::Cancelled) => return,
                             Err(error) => {
                                 eprintln!("gnomeengine: file chooser failed: {error}");
-                                toast_overlay
-                                    .add_toast(adw::Toast::new("Could not open file chooser"));
+                                toast_overlay.add_toast(adw::Toast::new(&format!(
+                                    "Could not open file chooser: {error}"
+                                )));
                                 return;
                             }
                         };
@@ -900,7 +905,8 @@ fn start_import(
             },
             Ok(Err(error)) => {
                 eprintln!("gnomeengine: import failed: {error}");
-                toast_overlay.add_toast(adw::Toast::new("Could not import this video"));
+                toast_overlay
+                    .add_toast(adw::Toast::new(&format!("Could not import video: {error}")));
             }
             Err(_) => {
                 eprintln!("gnomeengine: import task ended unexpectedly");
