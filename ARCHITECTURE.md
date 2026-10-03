@@ -2,10 +2,12 @@
 
 ## Current state by milestone
 
-M1 background placement remains incomplete: `renderer/` still presents the
-GStreamer paintable in an ordinary GTK window, not behind desktop icons or on
-the GNOME background layer. The extension does not place or control that
-surface.
+M1 now has an experimental Mutter desktop-window bridge: the renderer exports
+a stable GTK application ID, and the Shell extension classifies that top-level
+as a `DESKTOP` window, sizes it to the primary monitor, and keeps input
+transparent. The renderer fails closed unless the extension has advertised
+readiness. This is not yet runtime-validated on GNOME 50+ Wayland; the local
+host is GNOME 46 on X11.
 
 M2's session-bus renderer service is implemented. It owns one D-Bus name and
 exports `ApplyVideo`, `Pause`, `Resume`, `Stop`, and `GetStatus`. M3 adds an
@@ -19,21 +21,22 @@ GnomeEngine app -- local library / GTK preview
         |
         | session D-Bus control/status
         v
-Local video -> GStreamer playbin -> GTK paintable -> preview window
+Local video -> GStreamer playbin -> input-transparent GTK surface
                                       ^
-                                      |
+                                      | D-Bus lifecycle/readiness
                          renderer service
                                       ^
-GNOME Shell extension -- lifecycle --+
+GNOME Shell extension -- Mutter DESKTOP classification + lifecycle --+
 UPower / logind -------- system bus -+
 ```
 
-These service and lifecycle layers control the prototype's playback, but do
-not turn its preview window into a real desktop background.
+Mutter owns the compositor window actor; the extension does not reparent it to
+private Shell groups. The bridge and lifecycle interactions still require
+manual validation on the target session.
 
 ## Intended background process boundary
 
-The following remains a target design, not implemented functionality:
+The target deployment boundary is:
 
 ```text
 GnomeEngine desktop app
@@ -47,10 +50,9 @@ Minimal GNOME Shell integration -> desktop background layer
 
 The GUI can exit while the renderer remains active. The renderer must remain
 outside GNOME Shell so media work cannot stall or crash the Shell. D-Bus is for
-control and status, never video frames. The compositor surface-sharing and
-background-layer mechanism remains an open design task, so current Apply
-starts the renderer prototype's ordinary GTK preview window rather than a real
-desktop wallpaper.
+control and status, never video frames. The current bridge is experimental; if
+Mutter refuses the desktop window type, the renderer stops rather than showing
+an ordinary player window.
 
 ## Planned renderer types
 
@@ -60,10 +62,30 @@ desktop wallpaper.
 | Shader renderer | Planned | GPU shader playback, loaded only for an active shader wallpaper |
 | Web renderer | Planned | Isolated web content, loaded only for an active web wallpaper |
 
-Only video playback in a normal GTK window exists today. The app and a local
-library now exist; there is no online catalog or native installation package.
-The Shell extension is lifecycle-only and must remain a small, reversible
-controller.
+Only local video playback exists today; there is no online catalog. The app
+and package layout exist, with target installation still unvalidated. The Shell
+extension remains a small, reversible surface/lifecycle controller.
+
+## M5 distribution layout
+
+The upstream Ubuntu package installs the app and renderer separately. The
+desktop client runs from `/usr/bin`; the renderer is activated on demand by
+the user's session bus from `/usr/libexec/gnomeengine`. The system-wide GNOME
+Shell extension remains explicitly disabled until the user enables it.
+
+```text
+/usr/bin/gnomeengine
+        | session D-Bus
+        v
+session bus activation -> /usr/libexec/gnomeengine/gnomeengine-renderer
+        | lifecycle D-Bus
+        v
+GNOME Shell extension -> GNOME lifecycle events
+```
+
+M5 packaging installs the extension but does not enable it. The package is an
+Ubuntu 26.04 amd64 validation target; installation and runtime acceptance on
+that platform remain outstanding.
 
 ## Detailed references
 

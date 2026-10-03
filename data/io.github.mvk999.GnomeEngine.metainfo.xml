@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.mvk999.GnomeEngine</id>
+  <name>GnomeEngine</name>
+  <summary>Import and preview local video backgrounds</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="io.github.mvk999">
+    <name>GnomeEngine contributors</name>
+  </developer>
+  <description>
+    <p>
+      GnomeEngine is an experimental native GNOME application for importing,
+      organizing, and previewing local video backgrounds. It can control the
+      separate GStreamer renderer service over the user's session bus.
+    </p>
+    <p>
+      An experimental GNOME Shell extension integrates the renderer surface as
+      a desktop window. GNOME 50+ Wayland runtime validation is still pending.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.mvk999.GnomeEngine.desktop</launchable>
+  <url type="homepage">https://github.com/mvk999/GnomeEngine</url>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-10-03">
+      <description>
+        <p>First experimental native application and local library build.</p>
+      </description>
+    </release>
+  </releases>
+</component>

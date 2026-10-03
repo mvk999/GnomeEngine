@@ -2,8 +2,13 @@
 **/target/
 node_modules/
 dist/
+/debian/.debhelper/
+/debian/tmp/
+/debian/gnomeengine/
+/debian/*.substvars
+/debian/files
+/debian/debhelper-build-stamp
 *.mp4
 *.mkv
 *.webm
 .DS_Store
-

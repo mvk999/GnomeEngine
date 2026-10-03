@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+
+export CARGO_TARGET_DIR = $(CURDIR)/target/debian-package
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	@:
+
+override_dh_auto_build:
+	cargo build --workspace --release --locked
+
+override_dh_auto_install:
+	install -D -m 0755 target/debian-package/release/gnomeengine debian/tmp/usr/bin/gnomeengine
+	install -D -m 0755 target/debian-package/release/gnomeengine-renderer debian/tmp/usr/libexec/gnomeengine/gnomeengine-renderer
+	install -D -m 0644 app/resources/brand/gnomeengine-logo.svg debian/tmp/usr/share/gnomeengine/brand/gnomeengine-logo.svg
+	install -D -m 0644 data/io.github.mvk999.GnomeEngine.desktop debian/tmp/usr/share/applications/io.github.mvk999.GnomeEngine.desktop
+	install -D -m 0644 data/io.github.mvk999.GnomeEngine.metainfo.xml debian/tmp/usr/share/metainfo/io.github.mvk999.GnomeEngine.metainfo.xml
+	install -D -m 0644 data/io.github.mvk999.GnomeEngine.svg debian/tmp/usr/share/icons/hicolor/scalable/apps/io.github.mvk999.GnomeEngine.svg
+	install -D -m 0644 data/dbus-1/services/io.github.mvk999.GnomeEngine.Renderer.service debian/tmp/usr/share/dbus-1/services/io.github.mvk999.GnomeEngine.Renderer.service
+	install -D -m 0644 extension/extension.js debian/tmp/usr/share/gnome-shell/extensions/gnomeengine@mvk999.github.io/extension.js
+	install -D -m 0644 extension/metadata.json debian/tmp/usr/share/gnome-shell/extensions/gnomeengine@mvk999.github.io/metadata.json

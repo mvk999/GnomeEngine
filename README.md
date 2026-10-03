@@ -6,19 +6,20 @@ Lightweight live wallpaper engine built specifically for GNOME and Wayland.
 
 GnomeEngine is an experimental Rust/GTK4/GStreamer project targeting GNOME 50+
 on Wayland. The app, local library, renderer service, and event-driven lifecycle
-controller are implemented, but the renderer still opens an ordinary GTK video
-window: the GNOME desktop-background bridge (M1) is not implemented. No
-performance claim is made without a recorded measurement. The project has no
-decided license yet.
+controller are implemented. An experimental Mutter desktop-window bridge now
+connects the renderer to the GNOME session, but target-session behavior is not
+yet validated. No performance claim is made without a recorded measurement. The project is
+licensed under GPL-3.0-or-later; see [LICENSE](LICENSE).
 
 ## Current status
 
 The native GTK4/Libadwaita app imports local videos into an XDG-managed library,
 extracts available media metadata and a cached thumbnail, previews one item,
 and controls the renderer over session D-Bus. The renderer supports independent
-pause reasons and lifecycle status. Apply currently opens playback in the
-renderer prototype's GTK preview window; it does not set the GNOME desktop
-background.
+pause reasons and lifecycle status. On a supported session with the enabled
+GnomeEngine Shell extension, Apply asks Mutter to classify its input-transparent
+renderer surface as a desktop window. This bridge remains experimental until
+validated on GNOME 50+ Wayland.
 
 ## Requirements
 
@@ -32,11 +33,11 @@ background.
 
 Dependencies are not installed automatically.
 
-## Build and run the renderer prototype
+## Build and run the application
 
-The current code is a renderer validation prototype. It opens a normal GTK
-window so you can check whether GStreamer decodes and displays a local video.
-It does **not** set the video as the GNOME desktop wallpaper yet.
+The renderer is activated through the app and the session D-Bus service. Apply
+requires the GnomeEngine Shell extension to be enabled; without it the renderer
+fails closed instead of opening a normal player window.
 
 ### 1. Check the session and tools
 
@@ -94,6 +95,11 @@ cargo build --workspace
 cargo run -p gnomeengine
 ```
 
+To apply a wallpaper, use GNOME 50+ on Wayland with the GnomeEngine Shell
+extension installed and enabled. The extension must confirm it can classify the
+renderer surface; otherwise Apply reports that desktop integration is
+unavailable and does not open a video-player window.
+
 Close the app window to exit the controller UI; this does not stop an active
 renderer. The detail preview is app-local and stops when leaving the detail
 page.
@@ -102,25 +108,25 @@ The canonical fast checks used by CI are `./scripts/check.sh`. It requires
 Rust/Cargo and the native development libraries listed above; see
 [the testing strategy](docs/engineering/testing.md).
 
-### 4. Play a local video
+## Build the Ubuntu package for validation
 
-Pass an existing video file by absolute path:
+M5 packaging targets Ubuntu 26.04 amd64 and has not yet been validated as an
+installed user-facing release. On that target with the build dependencies
+listed in `debian/control` installed, run:
 
 ```sh
-cargo run -p gnomeengine-renderer -- "$HOME/Videos/wallpaper.mp4"
+./scripts/build-deb.sh
 ```
 
-The video opens in a GTK window and loops when it reaches the end. Audio is
-discarded. Close the window or press `Ctrl+C` in the terminal to stop playback.
-The renderer uses GStreamer autoplugging for decoder selection. The selected
-decoder and zero-copy path have not yet been instrumented, so hardware
-acceleration must not be assumed.
+This creates `dist/gnomeengine_<version>_amd64.deb` without installing it.
+For local testing, install the generated artifact explicitly with
+`sudo apt install ./dist/gnomeengine_*.deb`.
 
 ## Architecture
 
 - `app/`: GTK4/Libadwaita desktop client and local wallpaper library.
 - `renderer/`: external Rust/GStreamer playback and lifecycle service.
-- `extension/`: minimal GNOME Shell lifecycle integration.
+- `extension/`: minimal GNOME Shell desktop-surface and lifecycle integration.
 
 See the [architecture map](ARCHITECTURE.md),
 [decision records](docs/decisions/README.md), and the
@@ -132,8 +138,8 @@ knowledge base live under [`docs/`](docs/).
 
 ## Limitations
 
-- This is not yet a real desktop wallpaper. The renderer uses a regular GTK
-  window until M1 compositor/background integration is completed.
+- The Mutter desktop-window bridge is experimental and has not been validated
+  on the GNOME 50+ Wayland target. The available host is GNOME 46 on X11.
 - GNOME 50+ Wayland runtime behavior has not been validated on the current
   GNOME 46/X11 host. Battery, suspend, multi-monitor and graphical app flows
   also need manual validation.
@@ -143,10 +149,11 @@ knowledge base live under [`docs/`](docs/).
 
 ## Short roadmap
 
-1. M1: connect the external renderer to the GNOME background layer and validate
-   desktop interaction and session lifecycle.
-2. Complete runtime validation and measure the lifecycle/resource behavior on
+1. Validate the experimental M1 desktop bridge and lifecycle behavior on
+   supported GNOME 50+ Wayland hardware.
+2. Measure lifecycle/resource behavior on
    supported GNOME 50+ Wayland hardware.
 3. M5: native Ubuntu/Debian packaging and installation.
 
-The project license decision is pending.
+M5 packaging is implemented for validation, but still requires a target Ubuntu
+26.04 package build and installation/runtime acceptance before a public release.

@@ -42,3 +42,43 @@ jobs:
 
       - name: Run canonical checks
         run: ./scripts/check.sh
+
+  package:
+    name: Ubuntu 26.04 amd64 package
+    needs: checks
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install package build and metadata tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            cargo \
+            rustc \
+            pkg-config \
+            debhelper \
+            fakeroot \
+            nodejs \
+            desktop-file-utils \
+            appstream \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
+
+      - name: Install current Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build and validate the Ubuntu package
+        run: ./scripts/build-deb.sh
+
+      - name: Upload validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnomeengine-ubuntu-26.04-amd64
+          path: dist/gnomeengine_*_amd64.deb
+          if-no-files-found: error
+          retention-days: 7

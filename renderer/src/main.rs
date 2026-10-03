@@ -11,6 +11,11 @@ mod preferences;
 use controller::{RendererController, BUS_NAME};
 
 fn main() {
+    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("--version")) {
+        println!("gnomeengine-renderer {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+
     if let Err(error) = run() {
         eprintln!("gnomeengine-renderer: {error}");
         std::process::exit(1);

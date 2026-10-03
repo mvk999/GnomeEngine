@@ -9,10 +9,11 @@ the desktop without requiring users to build Rust code or keep a terminal open.
 
 ## Decision
 
-The first planned native distribution artifact is a Debian package for Ubuntu
-amd64. The package is not implemented yet. Flatpak, Snap, and AppImage are
-deferred until their GNOME Shell integration and runtime constraints are
-designed.
+The first native distribution artifact is an upstream Debian package for
+Ubuntu amd64. The M5 package layout, launcher metadata, and build workflow are
+implemented; building/installing the artifact on the Ubuntu 26.04 target is
+still pending validation. Flatpak, Snap, and AppImage are deferred until their
+GNOME Shell integration and runtime constraints are designed.
 
 ## Consequences
 

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=GnomeEngine
+Comment=Import and preview local video backgrounds
+Exec=gnomeengine
+Icon=io.github.mvk999.GnomeEngine
+Terminal=false
+Type=Application
+Categories=Utility;
+Keywords=wallpaper;video;GNOME;
+StartupNotify=true

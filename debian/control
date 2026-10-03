@@ -1,0 +1,38 @@
+Source: gnomeengine
+Section: graphics
+Priority: optional
+Maintainer: GnomeEngine contributors <mvk999@users.noreply.github.com>
+Homepage: https://github.com/mvk999/GnomeEngine
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc,
+ pkg-config,
+ libgtk-4-dev,
+ libadwaita-1-dev,
+ libgstreamer1.0-dev,
+ libgstreamer-plugins-base1.0-dev,
+ fakeroot,
+ nodejs,
+ desktop-file-utils,
+ appstream
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+
+Package: gnomeengine
+Architecture: amd64
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ gnome-shell (>= 50),
+ libgtk-4-media-gstreamer,
+ gstreamer1.0-gtk4,
+ gstreamer1.0-plugins-base,
+ gstreamer1.0-plugins-good,
+ gstreamer1.0-libav
+Description: experimental live wallpaper manager for GNOME
+ GnomeEngine provides a native application for importing and previewing local
+ video backgrounds and controlling an external GStreamer renderer. Desktop
+ placement uses an experimental GNOME Shell/Mutter bridge and requires GNOME
+ 50 or newer on Wayland with the GnomeEngine Shell extension enabled. This
+ integration has not yet been runtime-validated on the target session.

@@ -1,0 +1,9 @@
+usr/bin/gnomeengine
+usr/libexec/gnomeengine/gnomeengine-renderer
+usr/share/gnomeengine/brand/gnomeengine-logo.svg
+usr/share/applications/io.github.mvk999.GnomeEngine.desktop
+usr/share/metainfo/io.github.mvk999.GnomeEngine.metainfo.xml
+usr/share/icons/hicolor/scalable/apps/io.github.mvk999.GnomeEngine.svg
+usr/share/dbus-1/services/io.github.mvk999.GnomeEngine.Renderer.service
+usr/share/gnome-shell/extensions/gnomeengine@mvk999.github.io/extension.js
+usr/share/gnome-shell/extensions/gnomeengine@mvk999.github.io/metadata.json

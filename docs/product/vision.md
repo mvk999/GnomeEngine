@@ -11,8 +11,8 @@ The product is intended to be:
 - Native to GNOME and focused on Wayland.
 - Extremely considerate of CPU, memory, GPU, battery, wakeups, and Shell
   responsiveness.
-- Intended to be open-source, local-first, and usable without accounts,
-  analytics, or network access. The project's license decision is pending.
+- Licensed under GPL-3.0-or-later, local-first, and usable without accounts,
+  analytics, or network access.
 - Focused on preserving the user's normal desktop workflow.
 
 > The wallpaper should enhance the desktop without becoming a workload.

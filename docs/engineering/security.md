@@ -44,3 +44,14 @@ trusted. Apply these constraints as features are added.
 
 Do not log private file contents or personal data. Keep diagnostics local; the
 project currently has no telemetry or automatic crash upload.
+
+## Distribution
+
+- The project is licensed under `GPL-3.0-or-later`; the root `LICENSE` file
+  contains the canonical GPLv3 text.
+- The Ubuntu package installs fixed project binaries and data files only. It
+  has no maintainer scripts, setuid files, root daemon, or actions that modify
+  per-user extension state or home directories.
+- Package build scripts stage files under the repository and do not install
+  packages or write to system paths. Runtime media and manifests remain
+  user-owned local data.
