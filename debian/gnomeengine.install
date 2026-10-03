@@ -1,6 +1,8 @@
 usr/bin/gnomeengine
 usr/libexec/gnomeengine/gnomeengine-renderer
 usr/share/gnomeengine/brand/gnomeengine-logo.svg
+usr/share/gnomeengine/wallpapers usr/share/gnomeengine/
+usr/share/doc/gnomeengine/THIRD_PARTY_LICENSES.md
 usr/share/applications/io.github.mvk999.GnomeEngine.desktop
 usr/share/metainfo/io.github.mvk999.GnomeEngine.metainfo.xml
 usr/share/icons/hicolor/scalable/apps/io.github.mvk999.GnomeEngine.svg

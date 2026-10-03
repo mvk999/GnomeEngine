@@ -8,6 +8,9 @@
   <developer id="io.github.mvk999">
     <name>GnomeEngine contributors</name>
   </developer>
+  <url type="homepage">https://github.com/mvk999/GnomeEngine</url>
+  <url type="vcs-browser">https://github.com/mvk999/GnomeEngine</url>
+  <url type="bugtracker">https://github.com/mvk999/GnomeEngine/issues</url>
   <description>
     <p>
       GnomeEngine is an experimental native GNOME application for importing,
@@ -16,11 +19,11 @@
     </p>
     <p>
       An experimental GNOME Shell extension integrates the renderer surface as
-      a desktop window. GNOME 50+ Wayland runtime validation is still pending.
+      a desktop window. The bridge is experimental and target-session runtime
+      validation is still pending.
     </p>
   </description>
   <launchable type="desktop-id">io.github.mvk999.GnomeEngine.desktop</launchable>
-  <url type="homepage">https://github.com/mvk999/GnomeEngine</url>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.1.0" date="2026-10-03">

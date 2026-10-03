@@ -1,6 +1,6 @@
 # Packaging Direction
 
-The first native package is an upstream Ubuntu 26.04 amd64 `.deb`, assembled
+The current validation candidate is for Ubuntu 26.04 amd64, assembled
 with standard Debian `debian/` metadata and debhelper. `scripts/build-deb.sh`
 builds into ignored `dist/` without sudo or host installation. The package
 includes the application, renderer, session-bus activation service, GNOME Shell
@@ -16,31 +16,40 @@ describes the metadata document itself, not the application code. No GSettings
 schema is shipped because current policy preferences are stored by the renderer
 in its XDG config.
 
-The package targets GNOME Shell 50+ on Wayland. The currently implemented
-renderer still opens a regular GTK preview window rather than the GNOME desktop
-background, so the package metadata states this limitation and no public
-release should imply otherwise. Target runtime installation and integration
-still require validation on Ubuntu 26.04.
+The existing package metadata still targets GNOME Shell 50+ on Wayland. M7 is
+auditing Ubuntu 24.04/Noble as a new build/runtime baseline, with a Noble-built
+artifact preferred so it links against the oldest supported system ABI. The
+installed desktop integration is not yet validated on GNOME 46 or GNOME 50; do
+not claim either target as runtime-supported until the full manual matrix passes.
 
 Runtime dependencies are explicit in `debian/control`. The package uses distro
 GTK/GStreamer libraries and plugins; it does not bundle system libraries or
-build tools. Debian maintainer scripts are intentionally absent, preserving
+build tools. The renderer statically registers the upstream GTK4 GStreamer
+sink, so the runtime package does not depend on the `gstreamer1.0-gtk4` package
+(not available in Noble); it still uses distribution GTK/GStreamer libraries,
+and keeps the GTK media backend as a fallback. The upstream sink is MPL-2.0 and
+its notice is installed as documentation. Debian maintainer scripts are
+intentionally absent, preserving
 wallpaper library/configuration on removal and avoiding mutation of any user's
 desktop state.
 
-The reproducible release build is `scripts/build-deb.sh`; validators and
-package tree checks are run by `scripts/check-package.sh`. The Ubuntu 26.04
-CI job builds a short-lived validation artifact and does not publish a release.
+The release-candidate build is `scripts/build-deb.sh`; validators and package
+tree checks are run by `scripts/check-package.sh`. Ubuntu 24.04 and 26.04 CI
+build short-lived candidate artifacts; the Noble artifact is then checked for
+APT dependency resolution on Resolute. A tagged public release is gated on the
+explicit `GNOMEENGINE_RELEASE_RUNTIME_VALIDATED=true` repository variable and
+must only be enabled after M7's manual platform matrix passes.
 
-For a local target build on Ubuntu 26.04, install the build dependencies listed
-in `debian/control`, then run:
+For a local build on Ubuntu 24.04 or 26.04, install the build dependencies
+listed in `debian/control`, then run:
 
 ```sh
 ./scripts/build-deb.sh
 ```
 
-The resulting artifact is written to ignored `dist/`. Installation and removal
-are explicit user actions; the manual acceptance checklist is in
+The resulting target-labelled artifact and `SHA256SUMS` are written to ignored
+`dist/`. Installation and removal are explicit user actions; the manual
+acceptance checklist is in
 `docs/engineering/manual-testing.md`.
 
 Flatpak, Snap, and AppImage are out of scope until their desktop integration
