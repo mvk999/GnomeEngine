@@ -59,26 +59,8 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Install package build and metadata tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes \
-            build-essential \
-            cargo \
-            rustc \
-            pkg-config \
-            debhelper \
-            fakeroot \
-            nodejs \
-            desktop-file-utils \
-            appstream \
-            libgtk-4-dev \
-            libadwaita-1-dev \
-            libgstreamer1.0-dev \
-            libgstreamer-plugins-base1.0-dev
-
-      - name: Install current Rust stable
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install package build dependencies
+        uses: ./.github/actions/install-package-build-dependencies
 
       - name: Build and validate the Ubuntu package
         run: ./scripts/build-deb.sh
@@ -90,6 +72,75 @@ jobs:
           path: |
             dist/gnomeengine_*_amd64.deb
             dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  m7-gnome46-validation-package:
+    name: M7 GNOME 46 validation package (Ubuntu 24.04)
+    needs: checks
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install package build dependencies
+        uses: ./.github/actions/install-package-build-dependencies
+
+      - name: Build the temporary GNOME 46 validation package
+        run: ./scripts/build-m7-gnome46-validation-deb.sh
+
+      - name: Verify the validation artifact and unchanged production metadata
+        run: |
+          set -euo pipefail
+          find dist -maxdepth 1 -type f -print
+          mapfile -t packages < <(find dist -maxdepth 1 -type f \
+            -name 'gnomeengine_*~m7test46*_ubuntu24.04_amd64.deb' -print)
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            printf 'expected exactly one M7 GNOME 46 .deb, found %s\n' "${#packages[@]}" >&2
+            exit 1
+          fi
+          deb="${packages[0]}"
+          dpkg-deb -I "$deb"
+
+          package="$(dpkg-deb --field "$deb" Package)"
+          version="$(dpkg-deb --field "$deb" Version)"
+          architecture="$(dpkg-deb --field "$deb" Architecture)"
+          depends="$(dpkg-deb --field "$deb" Depends | tr '\n' ' ')"
+          [[ "$package" == gnomeengine ]]
+          [[ "$version" == *'~m7test46'* ]]
+          [[ "$architecture" == amd64 ]]
+          grep -Eq 'gnome-shell \(>= 46\)' <<<"$depends"
+          ! grep -Eq 'gnome-shell \(>= 50\)' <<<"$depends"
+
+          inspect_dir="$(mktemp -d)"
+          trap 'rm -rf "$inspect_dir"' EXIT
+          dpkg-deb --extract "$deb" "$inspect_dir"
+          metadata="$inspect_dir/usr/share/gnome-shell/extensions/gnomeengine@mvk999.github.io/metadata.json"
+          python3 - "$metadata" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          metadata = json.loads(Path(sys.argv[1]).read_text())
+          if metadata.get("uuid") != "gnomeengine@mvk999.github.io":
+              raise SystemExit("packaged extension UUID is incorrect")
+          if "46" not in metadata.get("shell-version", []):
+              raise SystemExit("validation artifact extension metadata does not include GNOME Shell 46")
+          print(f"Packaged extension shell-version: {metadata['shell-version']}")
+          PY
+
+          checksum_file="${deb}.sha256"
+          test -s "$checksum_file"
+          (cd "$(dirname "$deb")" && sha256sum --check "$(basename "$checksum_file")")
+          git diff --exit-code -- debian/control extension/metadata.json
+
+      - name: Upload M7 GNOME 46 validation package
+        uses: actions/upload-artifact@v4
+        with:
+          name: gnomeengine-m7-gnome46-validation-package
+          path: |
+            dist/*~m7test46*_ubuntu24.04_amd64.deb
+            dist/*~m7test46*_ubuntu24.04_amd64.deb.sha256
           if-no-files-found: error
           retention-days: 7
 

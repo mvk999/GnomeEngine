@@ -1,0 +1,26 @@
+name: Install GnomeEngine package build dependencies
+description: Install the native packages and Rust toolchain used by Debian package CI
+runs:
+  using: composite
+  steps:
+    - name: Install package build and metadata tools
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes \
+          build-essential \
+          cargo \
+          rustc \
+          pkg-config \
+          debhelper \
+          fakeroot \
+          nodejs \
+          desktop-file-utils \
+          appstream \
+          libgtk-4-dev \
+          libadwaita-1-dev \
+          libgstreamer1.0-dev \
+          libgstreamer-plugins-base1.0-dev
+
+    - name: Install current Rust stable
+      uses: dtolnay/rust-toolchain@stable
