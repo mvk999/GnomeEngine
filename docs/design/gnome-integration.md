@@ -41,10 +41,12 @@ Before accepting any bridge as supported:
 4. Record the selected mechanism and rejected alternatives in an ADR.
 
 The implementation is guarded by runtime capability checks and remains
-unsupported when the Shell cannot classify the surface as `DESKTOP`. The local
-validation host is GNOME 46 on X11; it is outside the declared target and cannot
-prove GNOME 50+ Wayland behavior. No runtime success is claimed until the
-manual checklist is completed.
+unavailable when the selected bridge cannot attach the surface. The local
+validation session is GNOME 46 on X11, which is one of the M7 targets; however,
+the extension is not installed in the current session, so the renderer-only
+Apply/Stop and EWMH smoke evidence does not establish Shell integration. GNOME
+46 Wayland desktop semantics and GNOME 50 Wayland remain separate acceptance
+gates. No target is considered supported until the manual matrix is complete.
 
 ## Runtime contract
 

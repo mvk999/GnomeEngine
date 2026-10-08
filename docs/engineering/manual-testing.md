@@ -6,6 +6,72 @@ does not establish correct Mutter stacking, focus, or input pass-through.
 For a graphical validation run, record GNOME Shell version, distribution,
 session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
 
+## M7 target identification
+
+Run the full acceptance sequence separately on each exact target below. Capture
+these values at the start of each run; XWayland applications do not count as
+an X11 session.
+
+| Ubuntu | GNOME Shell | Required `XDG_SESSION_TYPE` |
+| --- | ---: | --- |
+| 24.04 LTS | 46 | `wayland` |
+| 24.04 LTS | 46 | `x11` |
+| 26.04 LTS | 50 | `wayland` |
+
+```sh
+. /etc/os-release
+printf 'OS: %s %s (%s)\n' "$PRETTY_NAME" "$VERSION_ID" "$VERSION_CODENAME"
+gnome-shell --version
+printf 'session=%s\n' "$XDG_SESSION_TYPE"
+dpkg-query -W -f='${Package} ${Version}\n' \
+  libgtk-4-1 libadwaita-1-0 gstreamer1.0-tools
+```
+
+For each target, install/enable the extension using the supported test workflow,
+launch the installed or development GUI, import a legal local H.264 MP4, open
+its detail page, confirm preview, and Apply. Verify desktop placement, close
+the GUI while playback stays active, reopen it and confirm renderer state,
+then Stop. Repeat Apply → Stop → Apply at least three times. Record the selected
+sink, codec, resolution, FPS, decoder and graphics path when observable; mark
+DMA-BUF only when runtime evidence confirms it.
+
+Before the production metadata includes Shell 46, install a temporary test copy
+whose metadata advertises only the Shell version under test. This leaves the
+repository metadata untouched and does not disable GNOME's version validation
+globally. Run from the repository root in the target test session:
+
+```sh
+test_root="$(mktemp -d)"
+test_extension="$test_root/gnomeengine@mvk999.github.io"
+mkdir -p "$test_extension"
+cp extension/extension.js extension/metadata.json "$test_extension/"
+shell_version="$(gnome-shell --version | awk '{print $3}')"
+shell_major="${shell_version%%.*}"
+case "$shell_major" in
+  46)
+    node --input-type=module - "$test_extension/metadata.json" <<'NODE'
+import fs from 'node:fs';
+const path = process.argv[2];
+const metadata = JSON.parse(fs.readFileSync(path, 'utf8'));
+metadata['shell-version'] = ['46'];
+fs.writeFileSync(path, `${JSON.stringify(metadata, null, 2)}\n`);
+NODE
+    ;;
+  50) ;;
+  *) echo "Unsupported M7 test Shell: $shell_major" >&2; exit 2 ;;
+esac
+gnome-extensions pack "$test_extension" --out-dir "$test_root"
+gnome-extensions install --force \
+  "$test_root/gnomeengine@mvk999.github.io.shell-extension.zip"
+gnome-extensions enable gnomeengine@mvk999.github.io
+```
+
+After the run, disable and remove the temporary user extension with
+`gnome-extensions disable gnomeengine@mvk999.github.io` and
+`gnome-extensions uninstall gnomeengine@mvk999.github.io`, then remove
+`"$test_root"`. For packaged acceptance after metadata is widened, test the
+system-installed extension from the `.deb` instead of this temporary copy.
+
 ## Renderer and desktop-surface smoke check
 
 1. The renderer privately registers the bundled upstream `gtk4paintablesink`
@@ -13,8 +79,7 @@ session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
    sink; if static registration fails, verify the platform GTK media backend
    exists for the `GtkVideo` fallback. Do not infer the active EGL/GLX or
    DMA-BUF path from plugin compilation alone.
-2. On GNOME 50+ Wayland with the GnomeEngine extension enabled, apply a local
-   video through the app.
+2. Repeat the application flow on all three M7 targets in the table above.
 3. Confirm it appears behind normal windows as the desktop, with no player
    window, input interception, Alt+Tab entry, or Overview entry.
 4. Confirm audio is discarded and playback loops; Stop restores the unchanged
@@ -26,7 +91,10 @@ session type, GPU/driver, test video codec/resolution/FPS, and exact steps.
 
 ## M3 smart lifecycle checklist
 
-Run only in a disposable or nested supported GNOME 50+ Wayland session.
+Run the lifecycle checks on each M7 target. Use a disposable or nested session
+for disruptive cases where possible. Record hardware-dependent cases as
+unavailable when the required battery, display, monitor, lock, or suspend
+facility is absent.
 
 - [ ] renderer service starts and exports its D-Bus API
 - [ ] video playback starts and manual Pause/Resume preserves position
@@ -103,21 +171,18 @@ otherwise the renderer should fail closed without a player window.
 - [ ] Open/leave preview repeatedly and verify there is no accumulating
   renderer/preview process or persistent app process after quitting.
 
-The host used for implementation is Ubuntu 24.04.5 / GNOME Shell 46 / X11.
-The system `gtk4paintablesink` is absent, while the Noble-built renderer
-registers its bundled upstream plugin. A D-Bus Apply/Stop smoke reached
-`playing`/`stopped` on this Xorg host; the corresponding EWMH type, workspace,
-taskbar/pager, and non-focusable hints were observed with `xprop`. A separate
-GNOME46 nested Wayland smoke loaded the extension, started its owned renderer,
-and completed Apply/Stop. Neither smoke proves the full desktop UX or lifecycle.
-Mark all unobserved Alt+Tab, Overview, workspace, input, lock, suspend, and
-GNOME 50 behavior not validated.
+Earlier implementation runs recorded a GNOME 46/Xorg renderer Apply/Stop and
+EWMH-property smoke, plus a GNOME 46 nested-Wayland extension/owned-renderer
+Apply/Stop smoke. Neither smoke proves full desktop behavior or lifecycle.
+The current M7 finalization environment must be recorded separately; do not
+carry prior sink, performance, or desktop observations into a new run without
+reproducing them there. Mark every unobserved item not tested.
 
 ## M6 GUI V1 checklist
 
-The redesigned GUI has been launched in the available GNOME Shell 46/X11
-session for a smoke check. That is not the supported GNOME 50+ Wayland target
-and does not complete visual acceptance.
+The redesigned GUI has previously been launched in a GNOME Shell 46/X11
+session for a smoke check. That alone does not complete GUI or M7 acceptance;
+review it on each exact M7 target.
 That launch kept the window open but logged GTK CSS parser warnings from the
 host theme and two `GtkImage` baseline warnings; their source and impact on the
 target session are not established and should be investigated during the
@@ -157,29 +222,36 @@ validation below.
 
 ## M5 Ubuntu package acceptance
 
-Run the package build on Ubuntu 26.04 amd64 with build tools installed. The
-build script itself must not use sudo or modify system paths.
+Build the package on Ubuntu 24.04 amd64 as the ABI-baseline candidate after the
+GNOME 46 runtime evidence permits the package dependency to include Shell 46.
+Test that same artifact on Ubuntu 24.04 and 26.04. The build script itself
+must not use sudo or modify system paths.
 
 - [ ] `./scripts/check-package.sh` passes desktop, AppStream, extension, D-Bus
   activation, version, and SPDX checks.
-- [ ] `./scripts/build-deb.sh` builds a target-labelled
-      `dist/gnomeengine_<version>_ubuntu26.04_amd64.deb` and `SHA256SUMS`.
+- [ ] `./scripts/build-deb.sh` builds a
+      `dist/gnomeengine_<version>_built-on-ubuntu24.04_amd64.deb` candidate and
+      `SHA256SUMS`.
 - [ ] `dpkg-deb -I` and `dpkg-deb -c` show the expected package metadata and
   only the app, renderer, desktop data, icon, service, and UUID-matched
   extension; no build tree or Node modules are present.
-- [ ] Install explicitly with
-      `sudo apt install ./dist/gnomeengine_<version>_ubuntu26.04_amd64.deb` and
+- [ ] Install the same Noble-built candidate on Ubuntu 24.04 and Ubuntu 26.04;
   verify `gnomeengine` appears in the app grid and `gnome-extensions info`
-  recognizes the system extension.
+  recognizes the system extension. Use the explicit maintainer command
+  `sudo apt install ./dist/gnomeengine_<version>_built-on-ubuntu24.04_amd64.deb`.
 - [ ] Verify the renderer starts through session D-Bus activation only after
   Apply, and that no package script enabled the extension or changed user
   preferences.
 - [ ] Remove with `sudo apt remove gnomeengine`; system package files disappear
-  while the user's library/configuration remain.
-- [ ] Reinstall/upgrade and confirm managed wallpaper data remains intact.
+  while `$XDG_DATA_HOME/gnomeengine` and configuration remain. Reinstall and
+  verify the user's Library returns.
+- [ ] On Ubuntu 26.04, run APT dependency resolution and install the same Noble
+      package; do not treat dependency simulation alone as install/runtime
+      acceptance.
 - [ ] Run `appstreamcli validate`, `desktop-file-validate`, and `lintian` when
   installed; record unavailable tooling rather than implying it passed.
 
-The current host is Ubuntu 24.04 GNOME 46/X11 and lacks `debhelper`, so it has
-not built or installed the M5 package. These acceptance items remain pending
-until the Ubuntu 26.04 package CI or a target installation verifies them.
+The current finalization shell has not built or installed the package. Package
+build, dependency resolution, installation, GUI/extension operation, removal,
+and reinstall remain separate acceptance items; CI package builds alone do
+not satisfy them.

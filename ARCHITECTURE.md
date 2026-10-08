@@ -6,9 +6,10 @@ M1 has experimental desktop-window bridges with a shared renderer and D-Bus
 contract: GNOME 49+/Wayland uses `Meta.Window` classification, GNOME 46/Wayland
 uses an extension-owned `Meta.WaylandClient`, and GNOME 46/X11 uses the
 renderer-created GTK X11 surface with EWMH desktop hints. Every path fails
-closed unless the Shell extension advertises readiness. These bridges are not
-yet runtime-validated on the requested desktop sessions. See the active M7
-plan for the testing gates.
+closed unless the Shell extension advertises readiness. GNOME 46 nested
+Wayland Apply/Stop and GNOME 46/X11 renderer/EWMH smoke checks have been
+recorded, but neither is full desktop acceptance. See the active M7 plan for
+the testing gates.
 
 M2's session-bus renderer service is implemented. It owns one D-Bus name and
 exports `ApplyVideo`, `Pause`, `Resume`, `Stop`, and `GetStatus`. M3 adds an

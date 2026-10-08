@@ -13,5 +13,6 @@ Current component details live in:
 
 The renderer prefers GStreamer `playbin` and `gtk4paintablesink`, with GTK's
 `GtkVideo` media backend as a fallback when that optional sink is unavailable.
-Both currently display in a normal GTK window, not as a GNOME desktop
-background.
+Its GTK surface has experimental GNOME desktop bridges for GNOME 46 Wayland,
+GNOME 46 X11, and GNOME 49+/50 Wayland. These integrations still require the
+full runtime acceptance matrix documented in the active M7 plan.

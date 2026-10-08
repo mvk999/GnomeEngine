@@ -16,19 +16,16 @@ across pause/resume. Pipeline teardown reaches `NULL` for the direct
 GStreamer path; the GTK media stream is paused and released when stopped.
 
 The renderer is a separate long-lived process and session-bus service. It
-exports the M2 playback controls, reports coarse state, and composes M3 pause
+exports the shared playback controls, reports coarse state, and composes pause
 reasons. The app passes a validated managed video path; the renderer does not
-read library manifests. Desktop output is implemented as an experimental
-bridge: the renderer opens a non-focusable, input-transparent GTK surface, and
-the Shell extension asks Mutter to classify its toplevel as a desktop window.
-Apply fails closed until the extension confirms readiness. This mechanism has
-not been runtime-validated on its target desktop session, so it must not be
-represented as a proven desktop-wallpaper implementation yet. GNOME Shell 46
-and X11 compatibility are under investigation; in particular, the current
-extension uses window classification APIs introduced in Shell 49. See
-[GNOME integration](gnome-integration.md) and the active
-[integration plan](../plans/active/gnome-background-integration.md), plus the
-active [Ubuntu 24.04 compatibility plan](../plans/active/ubuntu-24-04-compatibility.md).
+read library manifests. Desktop output uses one GTK surface with three
+implemented bridge paths: GNOME 49+/50 Wayland uses Mutter window
+classification, GNOME 46 Wayland uses a Shell-owned `Meta.WaylandClient`, and
+GNOME 46 X11 uses EWMH properties on the GDK X11 surface. Apply fails closed
+until the extension confirms readiness. These paths have only limited smoke
+evidence; full desktop behavior, lifecycle, and performance acceptance remain
+open. See [GNOME integration](gnome-integration.md) and the active
+[Ubuntu 24.04 compatibility plan](../plans/active/ubuntu-24-04-compatibility.md).
 
 ## Intended service boundary
 

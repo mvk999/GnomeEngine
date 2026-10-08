@@ -71,8 +71,9 @@ feedback.
 
 ## Limits
 
-The current M1 renderer still displays a normal GTK preview window; it does not
-place its surface on GNOME's desktop background layer. Therefore this app
-controls the renderer prototype but cannot yet provide the final real-wallpaper
-experience. GNOME 50+ Wayland runtime validation was not available on the host
-used during M4 implementation.
+The renderer now has experimental desktop-surface bridges for GNOME 46
+Wayland, GNOME 46 X11, and GNOME 49+/50 Wayland. These bridges fail closed when
+the Shell does not confirm readiness. Earlier Apply/Stop smoke tests do not
+establish the full wallpaper experience; Alt+Tab, Overview, workspaces, input,
+stacking, lifecycle, and the GNOME 50 regression remain part of the active M7
+acceptance matrix.

@@ -46,3 +46,27 @@ or test Alt+Tab, Overview, workspaces, input pass-through, lock, or suspend.
 For X11 validation, verify `echo "$XDG_SESSION_TYPE"` returns `x11` after
 logging into “Ubuntu on Xorg”. A Wayland session running X11 clients through
 XWayland is still a Wayland test, not an X11 test.
+
+## Finalization environment check (2026-10-08)
+
+The current command environment is Ubuntu 24.04.5 and reports
+`XDG_SESSION_TYPE=x11`; the installed `gnome-shell` binary reports 46.0.
+However, there is no running `gnome-shell` process and the session manager bus
+is inaccessible, so this is not a usable live GNOME X11 test session. It has
+GTK 4.14.5, Libadwaita 1.5.0, and GStreamer 1.24.2 runtime packages, but no
+`cargo` or `rustc`, no GTK/Libadwaita/GStreamer development pkg-config files,
+and no installed GnomeEngine package. A temporary metadata-adjusted extension
+bundle could be created, but Shell could not discover or enable it; the test
+copy was removed. The extension syntax and
+`./scripts/check-package.sh` pass; `./scripts/check.sh` and
+`./scripts/build-deb.sh` stop because Cargo is unavailable. No package build,
+installation, app launch, renderer playback, or live Shell integration result
+was produced in this environment. The earlier Noble build and limited smoke
+results above remain historical evidence and were not reproduced here.
+
+APT candidate inspection found the declared `gnome-shell (>= 50)` dependency
+cannot be satisfied by this Noble host, whose GNOME Shell candidate is 46.0.
+The GTK media backend and declared GStreamer plugin packages have Noble
+candidates, while `gstreamer1.0-gtk4` has no Noble candidate and is not a
+package dependency. Without a built `.deb`, this was not a package-level APT
+simulation. No Ubuntu 26.04 APT or installation result was available.

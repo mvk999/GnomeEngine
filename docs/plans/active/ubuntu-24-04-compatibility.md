@@ -215,6 +215,19 @@ GL path, decoder, and DMA-BUF use before making performance claims.
 
 ## Progress
 
+- [ ] Finalization audit on 2026-10-08: checkout was clean at `70c4a86` on
+  `main`; package metadata validation and `git diff --check` passed. The
+  Ubuntu 24.04.5 command environment reports GNOME 46 and `XDG_SESSION_TYPE=x11`
+  but has no running Shell process or accessible session manager, so it is not
+  a usable GNOME X11 test session. Cargo/Rust and native development pkg-config
+  files are also unavailable, so the canonical workspace check and real
+  package build could not run. No runtime or package acceptance evidence was
+  produced; keep every affected criterion open.
+- [x] Corrected the package candidate filename to identify its build host and
+  corrected the gated release notes to identify the Noble ABI baseline. This
+  changes labels only; it does not decide package compatibility or open the
+  release gate.
+
 - [x] Repository baseline inspected at `dc68124`; M7 changes remain in progress.
 - [x] `./scripts/check.sh`: passed (23 app tests, 21 renderer tests).
 - [x] Host: Ubuntu 24.04.5 / GNOME 46 / X11; GTK 4.14.5, Libadwaita 1.5.0,

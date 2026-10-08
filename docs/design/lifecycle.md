@@ -94,14 +94,13 @@ both retain safe lock behavior and guarantee a future unlock callback.
 
 ## Scope and validation limits
 
-The current renderer still uses a normal GTK preview window and has no
-established background-surface/output mapping. The extension therefore uses
-the primary monitor as a conservative single-output policy, not as proof of
-real wallpaper visibility or multi-monitor background support. The Mutter
-signals and methods were introspected on the available GNOME Shell 46 / Mutter
-14 host; the extension manifest targets GNOME 50. GNOME 50 runtime behavior
-must be validated on a supported Wayland session before this design is
-considered fully accepted.
+The renderer creates the GTK surface used by the experimental desktop
+integration. GNOME 46 Wayland, GNOME 46 X11, and GNOME 49+/50 Wayland each have
+an implemented bridge, but the complete surface behavior has not passed the
+requested runtime matrix. Lifecycle policy currently treats the primary
+monitor as the wallpaper output; that policy is not evidence of independent
+multi-monitor wallpaper support. The extension manifest still targets GNOME
+50 only until Shell 46 and Shell 50 runtime acceptance is complete.
 
 System-bus power signals, renderer D-Bus methods, and policy interactions have
 automated or smoke coverage. Physical battery changes, lock/unlock, suspend,
