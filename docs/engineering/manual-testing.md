@@ -2,6 +2,7 @@
 
 The desktop surface bridge is experimental. A successful build or GTK preview
 does not establish correct Mutter stacking, focus, or input pass-through.
+For the guided M7 three-target flow, use the [runtime acceptance procedure](m7-acceptance.md).
 
 For a graphical validation run, record GNOME Shell version, distribution,
 session type, GPU/driver, test video codec/resolution/FPS, and exact steps.

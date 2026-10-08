@@ -32,7 +32,7 @@ The renderer core, playback pipeline, D-Bus control API, and lifecycle are share
 - Experimental GNOME Shell integration and lifecycle policies.
 - Infrastructure for shipping wallpapers with the application package. The initial wallpaper's video and thumbnail have not been added yet, so a fresh library may be empty.
 
-The project is experimental. Basic Apply/Stop smoke tests have been run in nested GNOME 46 Wayland and GNOME 46/X11 sessions, but these do not validate the complete desktop experience, panel behavior, workspaces, screen lock, suspend/resume, or performance. GNOME 50/Wayland regression testing is also pending. See the [compatibility report](docs/engineering/compatibility.md); no platform should be considered officially supported until full validation is complete.
+The project is experimental. Basic Apply/Stop smoke tests have been run in nested GNOME 46 Wayland and GNOME 46/X11 sessions, but these do not validate the complete desktop experience, panel behavior, workspaces, screen lock, suspend/resume, or performance. GNOME 50/Wayland regression testing is also pending. See the [compatibility report](docs/engineering/compatibility.md); no platform should be considered officially supported until full validation is complete. The [M7 acceptance procedure](docs/engineering/m7-acceptance.md) describes the real-session harness for the three required targets.
 
 There is no stable public release yet. Package and CI artifacts are for development and validation.
 

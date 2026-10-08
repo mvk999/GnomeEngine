@@ -12,3 +12,4 @@ dist/
 *.mkv
 *.webm
 .DS_Store
+/artifacts/m7/
