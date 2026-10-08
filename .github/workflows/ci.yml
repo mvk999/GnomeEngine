@@ -154,7 +154,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          release_version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" dist/*.deb dist/SHA256SUMS \
             --verify-tag \
-            --title "GnomeEngine $GITHUB_REF_NAME" \
-            --notes "Ubuntu 26.04 amd64 package. Runtime validation was explicitly approved after the M7 platform acceptance matrix passed."
+            --title "GnomeEngine $release_version" \
+            --notes "Ubuntu 24.04 ABI-baseline amd64 package for the validated Ubuntu 24.04 / 26.04 GNOME matrix. Published only after M7 runtime validation is approved."

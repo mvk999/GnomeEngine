@@ -37,7 +37,18 @@ deb_version="$(dpkg-parsechangelog --show-field Version)"
 upstream_version="$(sed -E 's/-[0-9][A-Za-z0-9.+~]*$//' <<<"$deb_version")"
 architecture="$(dpkg --print-architecture)"
 built_package="$(dirname "$repo_root")/gnomeengine_${deb_version}_${architecture}.deb"
-destination="$repo_root/dist/gnomeengine_${upstream_version}_ubuntu26.04_${architecture}.deb"
+source /etc/os-release
+case "${VERSION_ID:-}" in
+  24.04|26.04) build_release="$VERSION_ID" ;;
+  *)
+    printf 'error: package builds are supported only on the Ubuntu 24.04 and 26.04 validation hosts (found %s)\n' \
+      "${VERSION_ID:-unknown}" >&2
+    exit 2
+    ;;
+esac
+# The filename records where the candidate was built; runtime compatibility is
+# established separately by the M7 platform and package acceptance matrix.
+destination="$repo_root/dist/gnomeengine_${upstream_version}_built-on-ubuntu${build_release}_${architecture}.deb"
 
 if [[ ! -f "$built_package" ]]; then
   printf 'error: expected package was not produced: %s\n' "$built_package" >&2
